@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}BRE-PAY{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="{% block body_class %}{% endblock %}{% if landing %} is-landing{% endif %}">
+  {% if not landing %}
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">BRE-PAY</a>
+    <nav>
+      {% if session.get('user_id') %}
+        <a href="{{ url_for('dashboard') }}">Cuenta</a>
+        <a href="{{ url_for('logout') }}">Salir</a>
+      {% else %}
+        <a href="{{ url_for('login') }}">Entrar</a>
+        <a href="{{ url_for('register') }}">Registro</a>
+      {% endif %}
+    </nav>
+  </header>
+  {% endif %}
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-wrap {% if landing %}flash-landing{% endif %}">
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {% block fullpage %}
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  {% endblock %}
+
+  {% if not landing %}
+  <footer class="footer">
+    <p>BRE-PAY · Prototipo académico · RSA + Bre-B</p>
+  </footer>
+  {% endif %}
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

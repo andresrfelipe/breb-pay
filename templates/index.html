@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}BRE-PAY · Banca digital segura{% endblock %}
+{% block body_class %}landing-body{% endblock %}
+{% block fullpage %}
+<section class="nx">
+  <header class="nx-nav">
+    <a class="nx-logo" href="{{ url_for('index') }}">
+      <strong>BRE-PAY</strong>
+      <span>Banca digital</span>
+    </a>
+    <nav class="nx-links" aria-label="Principal">
+      <a class="is-active" href="{{ url_for('index') }}">Inicio</a>
+      <a href="#demo">Cuentas demo</a>
+      <a href="{{ url_for('login') }}">Seguridad</a>
+      <a href="{{ url_for('register') }}">Registro</a>
+    </nav>
+    <button class="nx-burger" type="button" id="menu-toggle" aria-label="Abrir menú" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </header>
+
+  <div class="nx-hero">
+    <div class="nx-copy">
+      <h1>
+        <span>Pagos Bre-B</span>
+        <span>firmados</span>
+        <span>y cifrados</span>
+      </h1>
+      <p class="nx-lede">
+        Transferencias inmediatas con llaves Bre-B, firma RSA-PSS y cifrado híbrido.
+        Autenticidad, integridad, no repudio y confidencialidad en un solo flujo.
+      </p>
+      <div class="nx-cta">
+        <a class="nx-btn nx-btn-primary" href="{{ url_for('register') }}">Abrir cuenta <span aria-hidden="true">→</span></a>
+        <a class="nx-btn nx-btn-secondary" href="{{ url_for('login') }}">Acceder</a>
+      </div>
+    </div>
+
+    <div class="nx-visual" aria-hidden="true">
+      <div class="nx-city"></div>
+      <div class="nx-fog"></div>
+      <svg class="nx-net" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
+        <g stroke="rgba(255,255,255,0.55)" stroke-width="1" fill="none">
+          <path d="M80 420 L220 260 L360 320 L520 140 L680 220"/>
+          <path d="M140 500 L280 340 L420 400 L580 250 L720 310"/>
+          <path d="M220 260 L280 340"/>
+          <path d="M360 320 L420 400"/>
+          <path d="M520 140 L580 250"/>
+          <path d="M680 220 L720 310"/>
+        </g>
+        <g fill="#fff">
+          <circle cx="80" cy="420" r="3.5"/>
+          <circle cx="220" cy="260" r="4"/>
+          <circle cx="360" cy="320" r="3"/>
+          <circle cx="520" cy="140" r="4.5"/>
+          <circle cx="680" cy="220" r="3.5"/>
+          <circle cx="140" cy="500" r="3"/>
+          <circle cx="280" cy="340" r="3.5"/>
+          <circle cx="420" cy="400" r="3"/>
+          <circle cx="580" cy="250" r="4"/>
+          <circle cx="720" cy="310" r="3"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <div class="nx-bottom">
+    <a class="nx-scroll" href="#demo">
+      <span class="nx-scroll-icon" aria-hidden="true">↓</span>
+      Desliza para descubrir
+    </a>
+    <aside class="nx-badge">
+      <span class="nx-lock" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="5" y="11" width="14" height="10" rx="2"/>
+          <path d="M8 11V8a4 4 0 0 1 8 0v3"/>
+        </svg>
+      </span>
+      <p>Tu seguridad es nuestra prioridad. Cada orden se firma y cifra con RSA.</p>
+    </aside>
+  </div>
+</section>
+
+<section class="nx-demo" id="demo">
+  <div class="nx-demo-inner">
+    <p class="nx-kicker">Cuentas de demostración</p>
+    <h2>Entra y prueba una transferencia Bre-B</h2>
+    <p class="nx-demo-pass">Contraseña compartida: <code>{{ demo_password }}</code></p>
+    <ul class="nx-demo-grid">
+      {% for a in demo_accounts %}
+      <li>
+        <a href="{{ url_for('login', u=a.username) }}">
+          <strong>{{ a.full_name }}</strong>
+          <span>@{{ a.username }}</span>
+          <span class="nx-breb">Bre-B · {{ a.breb }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+
+<aside class="dock-panel" id="dock-panel" hidden>
+  <div class="dock-panel-inner nx-panel">
+    <div class="dock-actions">
+      <a class="dock-link" href="{{ url_for('login') }}">Entrar</a>
+      <a class="dock-link" href="{{ url_for('register') }}">Abrir cuenta</a>
+    </div>
+    <h2>Acceso rápido demo</h2>
+    <p class="dock-note">Contraseña: <code>{{ demo_password }}</code></p>
+    <ul class="demo-list">
+      {% for a in demo_accounts %}
+      <li>
+        <a href="{{ url_for('login', u=a.username) }}">
+          <strong>{{ a.full_name }}</strong>
+          <span>@{{ a.username }}</span>
+          <span class="demo-breb">Bre-B · {{ a.breb }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    <button class="dock-close" type="button" id="menu-close">Cerrar</button>
+  </div>
+</aside>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const panel = document.getElementById('dock-panel');
+  const toggle = document.getElementById('menu-toggle');
+  const closeBtn = document.getElementById('menu-close');
+  function openMenu() {
+    panel.hidden = false;
+    toggle.setAttribute('aria-expanded', 'true');
+  }
+  function closeMenu() {
+    panel.hidden = true;
+    toggle.setAttribute('aria-expanded', 'false');
+  }
+  toggle?.addEventListener('click', () => panel.hidden ? openMenu() : closeMenu());
+  closeBtn?.addEventListener('click', closeMenu);
+  panel?.addEventListener('click', (e) => { if (e.target === panel) closeMenu(); });
+</script>
+{% endblock %}

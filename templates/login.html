@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Entrar · BRE-PAY{% endblock %}
+{% block content %}
+<section class="auth-layout">
+  <div class="auth-copy">
+    <p class="eyebrow">Acceso</p>
+    <h1>Entrar a<br>BRE-PAY</h1>
+    <p class="muted">Usa una cuenta demo o tu registro. Toda transferencia se firma y cifra con RSA.</p>
+  </div>
+
+  <div class="auth-panel">
+    <form method="post" class="form">
+      <label>Usuario
+        <input name="username" required value="{{ preset_username or '' }}" placeholder="ana">
+      </label>
+      <label>Contraseña
+        <input type="password" name="password" required value="{% if preset_username %}{{ demo_password }}{% endif %}" placeholder="••••••••">
+      </label>
+      <button class="btn" type="submit">Continuar</button>
+    </form>
+
+    <div class="demo-inline">
+      <p class="eyebrow">Cuentas prestablecidas</p>
+      <p class="muted">Contraseña: <code>{{ demo_password }}</code></p>
+      <ul class="demo-chips">
+        {% for a in demo_accounts %}
+        <li>
+          <a href="{{ url_for('login', u=a.username) }}">
+            <span>@{{ a.username }}</span>
+            <small>{{ a.breb }}</small>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <p class="muted auth-alt">¿Nuevo? <a href="{{ url_for('register') }}">Crear cuenta</a></p>
+  </div>
+</section>
+{% endblock %}

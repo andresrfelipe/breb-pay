@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Cuenta · BRE-PAY{% endblock %}
+{% block content %}
+<section class="dash-head">
+  <div>
+    <p class="eyebrow">Cuenta activa</p>
+    <h1>{{ user.full_name }}</h1>
+    <p class="muted">@{{ user.username }}</p>
+  </div>
+  <div class="balance-block">
+    <span class="label">Saldo disponible</span>
+    <strong>${{ '%.2f'|format(user.balance) }}</strong>
+    <span class="currency">COP</span>
+  </div>
+</section>
+
+<section class="dash-grid">
+  <article class="panel">
+    <h2>Llave Bre-B</h2>
+    <p class="muted">Identificador para recibir transferencias.</p>
+    <form method="post" action="{{ url_for('create_breb') }}" class="form">
+      <label>Tipo
+        <select name="key_type" required>
+          {% for t in breb_types %}
+            <option value="{{ t }}">{{ t }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Valor
+        <input name="key_value" required placeholder="3001234567">
+      </label>
+      <button class="btn" type="submit">Registrar llave</button>
+    </form>
+    <h3 class="sub">Tus llaves</h3>
+    {% if keys %}
+      <ul class="key-list">
+        {% for k in keys %}
+          <li>
+            <code>{{ k.key_value }}</code>
+            <span class="tag">{{ k.key_type }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">Sin llaves aún.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel">
+    <h2>Transferir</h2>
+    <p class="muted">Firmado con tu RSA y cifrado para el destino.</p>
+    <form method="post" action="{{ url_for('transfer') }}" class="form" id="transfer-form">
+      <label>Bre-B destino
+        <input name="receiver_breb" id="receiver_breb" required placeholder="3001002001" list="demo-brebs" autocomplete="off">
+      </label>
+      <datalist id="demo-brebs">
+        {% for a in demo_accounts %}
+          <option value="{{ a.breb }}">{{ a.full_name }}</option>
+        {% endfor %}
+      </datalist>
+      <div id="breb-hint" class="breb-hint" hidden></div>
+      <label>Monto (COP)
+        <input type="number" name="amount" min="0.01" step="0.01" required placeholder="25000">
+      </label>
+      <label>Nota
+        <input name="note" maxlength="120" placeholder="pago">
+      </label>
+      <button class="btn" type="submit">Firmar y enviar</button>
+    </form>
+    <div class="demo-inline compact">
+      <p class="eyebrow">Destinos demo</p>
+      <ul class="demo-chips">
+        {% for a in demo_accounts if a.username != user.username %}
+        <li><button type="button" class="chip-fill" data-breb="{{ a.breb }}">{{ a.breb }}</button></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </article>
+</section>
+
+<section class="panel wide">
+  <h2>Movimientos</h2>
+  {% if transactions %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>Contraparte</th>
+            <th>Bre-B</th>
+            <th>Monto</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in transactions %}
+            {% set outgoing = t.sender_id == user.id %}
+            <tr>
+              <td class="mono">{{ t.created_at }}</td>
+              <td>{% if outgoing %}<span class="tag">Enviado</span>{% else %}<span class="tag tag-in">Recibido</span>{% endif %}</td>
+              <td>{% if outgoing %}@{{ t.receiver_username }}{% else %}@{{ t.sender_username }}{% endif %}</td>
+              <td class="mono">{{ t.receiver_breb }}</td>
+              <td class="mono {% if outgoing %}neg{% else %}pos{% endif %}">
+                {% if outgoing %}-{% else %}+{% endif %}${{ '%.2f'|format(t.amount) }}
+              </td>
+              <td><a href="{{ url_for('transaction_detail', tx_id=t.id) }}">Detalle</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Sin movimientos.</p>
+  {% endif %}
+</section>
+
+<section class="panel wide">
+  <h2>Clave pública RSA</h2>
+  <pre class="pem">{{ user.public_key_pem }}</pre>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('.chip-fill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const input = document.getElementById('receiver_breb');
+      if (!input) return;
+      input.value = btn.dataset.breb;
+      input.dispatchEvent(new Event('input'));
+    });
+  });
+</script>
+{% endblock %}

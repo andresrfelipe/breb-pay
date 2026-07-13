@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Movimiento #{{ tx.id }} · BRE-PAY{% endblock %}
+{% block content %}
+<section class="dash-head">
+  <div>
+    <p class="eyebrow">Movimiento #{{ tx.id }}</p>
+    <h1>${{ '%.2f'|format(tx.amount) }}</h1>
+    <p class="muted">@{{ tx.sender_username }} → @{{ tx.receiver_username }} · {{ tx.receiver_breb }}</p>
+  </div>
+  <a class="btn btn-ghost" href="{{ url_for('dashboard') }}">Volver</a>
+</section>
+
+<section class="dash-grid">
+  <article class="panel">
+    <h2>Firma</h2>
+    <p class="status {% if signature_ok %}ok{% else %}bad{% endif %}">
+      {% if signature_ok %}RSA-PSS válida{% else %}Firma inválida{% endif %}
+    </p>
+    <div class="btn-row">
+      <button class="btn" type="button" id="btn-verify" data-tx="{{ tx.id }}">Reverificar</button>
+      <button class="btn btn-ghost" type="button" id="btn-tamper" data-tx="{{ tx.id }}">Simular alteración</button>
+    </div>
+    <pre id="verify-result" class="result-box" hidden></pre>
+  </article>
+
+  <article class="panel">
+    <h2>Cifrado</h2>
+    {% if user.id == tx.receiver_id %}
+      {% if decrypted %}
+        <p class="status ok">Descifrado con clave privada</p>
+        <pre class="result-box">{{ decrypted | tojson(indent=2) }}</pre>
+      {% else %}
+        <p class="status bad">Error al descifrar</p>
+        <p class="muted">{{ decrypt_error }}</p>
+      {% endif %}
+    {% else %}
+      <p class="muted">Solo el destinatario descifra el sobre RSA-OAEP + AES-GCM.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel wide">
+  <h2>Payload</h2>
+  <pre class="result-box">{{ payload | tojson(indent=2) }}</pre>
+</section>
+
+<section class="panel wide">
+  <h2>Material criptográfico</h2>
+  <div class="meta-grid">
+    <div>
+      <h3>Firma</h3>
+      <pre class="pem small">{{ tx.signature_b64 }}</pre>
+    </div>
+    <div>
+      <h3>Clave AES cifrada</h3>
+      <pre class="pem small">{{ tx.encrypted_key[:120] }}…</pre>
+    </div>
+    <div>
+      <h3>Nonce</h3>
+      <pre class="pem small">{{ tx.nonce }}</pre>
+    </div>
+    <div>
+      <h3>Ciphertext</h3>
+      <pre class="pem small">{{ tx.ciphertext[:120] }}…</pre>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById('btn-verify')?.addEventListener('click', () => runVerify(false));
+  document.getElementById('btn-tamper')?.addEventListener('click', () => runVerify(true));
+  async function runVerify(tamper) {
+    const txId = document.getElementById('btn-verify').dataset.tx;
+    const box = document.getElementById('verify-result');
+    box.hidden = false;
+    box.textContent = 'Verificando…';
+    const res = await fetch(`/api/verify/${txId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tamper })
+    });
+    const data = await res.json();
+    box.textContent = JSON.stringify(data, null, 2);
+    box.classList.toggle('bad-box', !data.valid);
+    box.classList.toggle('ok-box', !!data.valid);
+  }
+</script>
+{% endblock %}

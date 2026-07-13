@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Registro · BRE-PAY{% endblock %}
+{% block content %}
+<section class="auth-layout">
+  <div class="auth-copy">
+    <p class="eyebrow">Alta</p>
+    <h1>Abrir<br>cuenta</h1>
+    <p class="muted">Se genera tu par RSA 2048 al registrarte. Luego asocias una llave Bre-B.</p>
+  </div>
+  <div class="auth-panel">
+    <form method="post" class="form">
+      <label>Nombre completo
+        <input name="full_name" required maxlength="80" placeholder="Ana Pérez">
+      </label>
+      <label>Usuario
+        <input name="username" required maxlength="30" placeholder="ana_perez" pattern="[a-z0-9_]{3,30}">
+      </label>
+      <label>Contraseña
+        <input type="password" name="password" required minlength="6" placeholder="mínimo 6 caracteres">
+      </label>
+      <button class="btn" type="submit">Registrar</button>
+    </form>
+    <p class="muted auth-alt">¿Ya tienes cuenta? <a href="{{ url_for('login') }}">Entrar</a></p>
+  </div>
+</section>
+{% endblock %}
