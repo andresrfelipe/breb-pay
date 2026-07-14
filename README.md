@@ -15,12 +15,14 @@ Prototipo académico (MVP) de un sistema de pagos inspirado en llaves **Bre-B**,
 - Dependencias en `requirements.txt`
 
 ```bash
-cd breb_pay
+cd breb-pay
 pip install -r requirements.txt
 python app.py
 ```
 
-Abre http://127.0.0.1:5000
+Abre http://127.0.0.1:5001
+
+> En macOS el puerto 5000 suele estar ocupado por AirPlay Receiver (error 403). Por eso la app usa el **5001**.
 
 ## Cuentas demo prestablecidas
 

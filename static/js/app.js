@@ -10,7 +10,7 @@
     window.setTimeout(() => el.classList.remove("is-highlight"), 2200);
   }
 
-  window.focusHashTarget();
+  focusHashTarget();
   window.addEventListener("hashchange", focusHashTarget);
 
   document.querySelectorAll(".notif-jump").forEach((link) => {

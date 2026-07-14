@@ -933,4 +933,5 @@ def lookup_breb():
 
 if __name__ == "__main__":
     db.init_db()
-    app.run(debug=True, port=5000)
+    # Puerto 5001: en macOS el 5000 lo ocupa AirPlay Receiver y responde 403.
+    app.run(debug=True, port=5001)
