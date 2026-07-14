@@ -27,8 +27,12 @@ def main() -> None:
     signature = crypto_service.sign_payload(priv_a, order)
     assert crypto_service.verify_signature(pub_a, order, signature), "firma válida esperada"
 
+    digest = crypto_service.payload_hash(order)
+    assert len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)
+
     tampered = dict(order)
     tampered["amount"] = 999999.0
+    assert crypto_service.payload_hash(tampered) != digest
     assert not crypto_service.verify_signature(pub_a, tampered, signature), "tamper debe fallar"
 
     envelope = crypto_service.encrypt_json(pub_b, order)

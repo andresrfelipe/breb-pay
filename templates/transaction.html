@@ -10,17 +10,51 @@
   <a class="btn btn-ghost" href="{{ url_for('dashboard') }}">Volver</a>
 </section>
 
+{# Panel de confianza (1.1) #}
+<section class="panel wide trust-panel" id="trust-panel" data-tx="{{ tx.id }}" aria-label="Cadena de confianza criptográfica">
+  <div class="trust-head">
+    <div>
+      <h2>Cadena de confianza</h2>
+      <p class="muted">Payload → hash → firma → verificación → cifrado</p>
+    </div>
+    <p class="trust-badge {% if signature_ok %}ok{% else %}bad{% endif %}" id="trust-badge">
+      {% if signature_ok %}Integridad verificada{% else %}Integridad comprometida{% endif %}
+    </p>
+  </div>
+
+  <ol class="trust-steps" id="trust-steps">
+    {% for step in trust_steps %}
+    <li class="trust-step {% if step.ok %}is-ok{% else %}is-bad{% endif %}" data-step="{{ step.id }}">
+      <div class="trust-step-index" aria-hidden="true">{{ loop.index }}</div>
+      <div class="trust-step-body">
+        <div class="trust-step-title">
+          <strong>{{ step.title }}</strong>
+          <span class="trust-pill" data-pill>{{ 'OK' if step.ok else 'FALLA' }}</span>
+        </div>
+        <p class="muted">{{ step.detail }}</p>
+        <code class="trust-value" data-value>{{ step.value }}</code>
+      </div>
+      {% if not loop.last %}
+      <div class="trust-arrow" aria-hidden="true">→</div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+
+  <div class="btn-row">
+    <button class="btn" type="button" id="btn-verify" data-tx="{{ tx.id }}">Reverificar</button>
+    <button class="btn btn-ghost" type="button" id="btn-tamper" data-tx="{{ tx.id }}">Simular alteración</button>
+  </div>
+  <pre id="verify-result" class="result-box" hidden></pre>
+</section>
+
 <section class="dash-grid">
   <article class="panel">
     <h2>Firma</h2>
-    <p class="status {% if signature_ok %}ok{% else %}bad{% endif %}">
+    <p class="status {% if signature_ok %}ok{% else %}bad{% endif %}" id="sig-status">
       {% if signature_ok %}RSA-PSS válida{% else %}Firma inválida{% endif %}
     </p>
-    <div class="btn-row">
-      <button class="btn" type="button" id="btn-verify" data-tx="{{ tx.id }}">Reverificar</button>
-      <button class="btn btn-ghost" type="button" id="btn-tamper" data-tx="{{ tx.id }}">Simular alteración</button>
-    </div>
-    <pre id="verify-result" class="result-box" hidden></pre>
+    <p class="muted">Fingerprint clave pública: <code class="mono">{{ sender_fingerprint }}</code></p>
   </article>
 
   <article class="panel">
@@ -35,6 +69,7 @@
       {% endif %}
     {% else %}
       <p class="muted">Solo el destinatario descifra el sobre RSA-OAEP + AES-GCM.</p>
+      <p class="muted">Hash del payload: <code class="mono">{{ payload_digest[:32] }}…</code></p>
     {% endif %}
   </article>
 </section>
@@ -69,10 +104,50 @@
 
 {% block scripts %}
 <script>
-  document.getElementById('btn-verify')?.addEventListener('click', () => runVerify(false));
-  document.getElementById('btn-tamper')?.addEventListener('click', () => runVerify(true));
+  const verifyBtn = document.getElementById('btn-verify');
+  const tamperBtn = document.getElementById('btn-tamper');
+  verifyBtn?.addEventListener('click', () => runVerify(false));
+  tamperBtn?.addEventListener('click', () => runVerify(true));
+
+  function setVerifyStep(valid, message, payloadChecked) {
+    const step = document.querySelector('.trust-step[data-step="verify"]');
+    const badge = document.getElementById('trust-badge');
+    const sigStatus = document.getElementById('sig-status');
+    if (!step) return;
+
+    step.classList.toggle('is-ok', valid);
+    step.classList.toggle('is-bad', !valid);
+    const pill = step.querySelector('[data-pill]');
+    const value = step.querySelector('[data-value]');
+    if (pill) pill.textContent = valid ? 'OK' : 'FALLA';
+    if (value) {
+      value.textContent = message || (valid ? 'Firma válida' : 'Firma inválida');
+    }
+
+    if (badge) {
+      badge.classList.toggle('ok', valid);
+      badge.classList.toggle('bad', !valid);
+      badge.textContent = valid ? 'Integridad verificada' : 'Integridad comprometida';
+    }
+    if (sigStatus) {
+      sigStatus.classList.toggle('ok', valid);
+      sigStatus.classList.toggle('bad', !valid);
+      sigStatus.textContent = valid ? 'RSA-PSS válida' : 'Firma inválida';
+    }
+
+    // Si se simuló alteración, reflejarlo en el paso de payload/hash
+    const hashStep = document.querySelector('.trust-step[data-step="hash"]');
+    if (hashStep && payloadChecked && !valid) {
+      const hv = hashStep.querySelector('[data-value]');
+      if (hv) hv.textContent = 'Payload alterado (monto modificado en demo)';
+      hashStep.classList.add('is-warn');
+    } else if (hashStep) {
+      hashStep.classList.remove('is-warn');
+    }
+  }
+
   async function runVerify(tamper) {
-    const txId = document.getElementById('btn-verify').dataset.tx;
+    const txId = verifyBtn.dataset.tx;
     const box = document.getElementById('verify-result');
     box.hidden = false;
     box.textContent = 'Verificando…';
@@ -85,6 +160,7 @@
     box.textContent = JSON.stringify(data, null, 2);
     box.classList.toggle('bad-box', !data.valid);
     box.classList.toggle('ok-box', !!data.valid);
+    setVerifyStep(!!data.valid, data.message, data.payload_checked);
   }
 </script>
 {% endblock %}

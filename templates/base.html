@@ -16,6 +16,12 @@
     <nav>
       {% if session.get('user_id') %}
         <a href="{{ url_for('dashboard') }}">Cuenta</a>
+        <a class="nav-bell" href="{{ url_for('dashboard') }}#notifications" title="Avisos">
+          Avisos
+          {% if unread_notifications %}
+            <span class="nav-badge">{{ unread_notifications }}</span>
+          {% endif %}
+        </a>
         <a href="{{ url_for('logout') }}">Salir</a>
       {% else %}
         <a href="{{ url_for('login') }}">Entrar</a>
@@ -29,7 +35,7 @@
     {% if messages %}
       <div class="flash-wrap {% if landing %}flash-landing{% endif %}">
         {% for category, message in messages %}
-          <div class="flash flash-{{ category }}">{{ message }}</div>
+          <div class="flash flash-{{ category }}" role="status">{{ message }}</div>
         {% endfor %}
       </div>
     {% endif %}

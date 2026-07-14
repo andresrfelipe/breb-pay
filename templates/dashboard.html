@@ -9,7 +9,7 @@
   </div>
   <div class="balance-block">
     <span class="label">Saldo disponible</span>
-    <strong>${{ '%.2f'|format(user.balance) }}</strong>
+    <strong id="user-balance" data-balance="{{ user.balance }}">${{ '%.2f'|format(user.balance) }}</strong>
     <span class="currency">COP</span>
   </div>
 </section>
@@ -17,7 +17,7 @@
 <section class="dash-grid">
   <article class="panel">
     <h2>Llave Bre-B</h2>
-    <p class="muted">Identificador para recibir transferencias.</p>
+    <p class="muted">Activa, desactiva o marca una llave como primaria.</p>
     <form method="post" action="{{ url_for('create_breb') }}" class="form">
       <label>Tipo
         <select name="key_type" required>
@@ -35,9 +35,23 @@
     {% if keys %}
       <ul class="key-list">
         {% for k in keys %}
-          <li>
-            <code>{{ k.key_value }}</code>
-            <span class="tag">{{ k.key_type }}</span>
+          <li class="key-row {% if not k.is_active %}is-inactive{% endif %}">
+            <div class="key-main">
+              <code>{{ k.key_value }}</code>
+              <span class="tag">{{ k.key_type }}</span>
+              {% if k.is_primary %}<span class="tag tag-primary">Primaria</span>{% endif %}
+              {% if not k.is_active %}<span class="tag">Inactiva</span>{% endif %}
+            </div>
+            <div class="key-actions">
+              {% if k.is_active and not k.is_primary %}
+              <form method="post" action="{{ url_for('set_primary_breb', key_id=k.id) }}">
+                <button class="btn-mini" type="submit">Primaria</button>
+              </form>
+              {% endif %}
+              <form method="post" action="{{ url_for('toggle_breb', key_id=k.id) }}">
+                <button class="btn-mini" type="submit">{% if k.is_active %}Desactivar{% else %}Activar{% endif %}</button>
+              </form>
+            </div>
           </li>
         {% endfor %}
       </ul>
@@ -48,25 +62,49 @@
 
   <article class="panel">
     <h2>Transferir</h2>
-    <p class="muted">Firmado con tu RSA y cifrado para el destino.</p>
+    <p class="muted">Revisa, confirma con tu contraseña y firma con RSA.</p>
     <form method="post" action="{{ url_for('transfer') }}" class="form" id="transfer-form">
       <label>Bre-B destino
-        <input name="receiver_breb" id="receiver_breb" required placeholder="3001002001" list="demo-brebs" autocomplete="off">
+        <input name="receiver_breb" id="receiver_breb" required placeholder="3001002001" list="breb-suggestions" autocomplete="off">
       </label>
-      <datalist id="demo-brebs">
+      <datalist id="breb-suggestions">
+        {% for f in favorites %}
+          <option value="{{ f.breb_value }}">{{ f.alias }}</option>
+        {% endfor %}
         {% for a in demo_accounts %}
           <option value="{{ a.breb }}">{{ a.full_name }}</option>
         {% endfor %}
       </datalist>
       <div id="breb-hint" class="breb-hint" hidden></div>
       <label>Monto (COP)
-        <input type="number" name="amount" min="0.01" step="0.01" required placeholder="25000">
+        <input type="number" name="amount" id="transfer-amount" min="0.01" step="0.01" required placeholder="25000">
       </label>
       <label>Nota
-        <input name="note" maxlength="120" placeholder="pago">
+        <input name="note" id="transfer-note" maxlength="120" placeholder="pago">
       </label>
-      <button class="btn" type="submit">Firmar y enviar</button>
+      <label>Guardar como favorito (opcional)
+        <input name="save_alias" id="save-alias" maxlength="40" placeholder="ej. Arriendo">
+      </label>
+      <input type="hidden" name="confirm_password" id="confirm-password-field" value="">
+      <button class="btn" type="submit" id="transfer-review-btn">Revisar transferencia</button>
     </form>
+
+    {% if favorites %}
+    <div class="demo-inline compact">
+      <p class="eyebrow">Favoritos</p>
+      <ul class="demo-chips">
+        {% for f in favorites %}
+        <li>
+          <button type="button" class="chip-fill" data-breb="{{ f.breb_value }}" {% if not f.breb_active %}disabled title="Llave inactiva"{% endif %}>
+            {{ f.alias }}
+            <small>{{ f.breb_value }}</small>
+          </button>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     <div class="demo-inline compact">
       <p class="eyebrow">Destinos demo</p>
       <ul class="demo-chips">
@@ -76,6 +114,161 @@
       </ul>
     </div>
   </article>
+</section>
+
+<section class="dash-grid" id="contacts">
+  <article class="panel">
+    <h2>Contactos favoritos</h2>
+    <p class="muted">Guarda Bre-B con un alias para reutilizarlos.</p>
+    <form method="post" action="{{ url_for('add_favorite') }}" class="form">
+      <label>Alias
+        <input name="alias" required maxlength="40" placeholder="Ana / Arriendo">
+      </label>
+      <label>Bre-B
+        <input name="breb_value" required placeholder="3001002001">
+      </label>
+      <button class="btn" type="submit">Guardar contacto</button>
+    </form>
+    {% if favorites %}
+      <ul class="fav-list">
+        {% for f in favorites %}
+          <li>
+            <div>
+              <strong>{{ f.alias }}</strong>
+              <code>{{ f.breb_value }}</code>
+              {% if f.owner_name %}<span class="muted"> · {{ f.owner_name }}</span>{% endif %}
+            </div>
+            <form method="post" action="{{ url_for('delete_favorite', fav_id=f.id) }}">
+              <button class="btn-mini" type="submit">Quitar</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">Sin contactos aún.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel" id="requests">
+    <h2>Solicitar pago</h2>
+    <p class="muted">Pide dinero a otra llave Bre-B (request-to-pay).</p>
+    <form method="post" action="{{ url_for('create_payment_request') }}" class="form">
+      <label>Bre-B del pagador
+        <input name="payer_breb" required placeholder="carlos@brepay.co" list="breb-suggestions">
+      </label>
+      <label>Monto (COP)
+        <input type="number" name="amount" min="0.01" step="0.01" required placeholder="50000">
+      </label>
+      <label>Nota
+        <input name="note" maxlength="120" placeholder="almuerzo">
+      </label>
+      <button class="btn" type="submit">Enviar solicitud</button>
+    </form>
+
+    {% if incoming_requests %}
+      <h3 class="sub">Por pagar</h3>
+      <ul class="req-list">
+        {% for r in incoming_requests %}
+          <li id="req-{{ r.id }}" class="req-item">
+            <div>
+              <strong>{{ r.requester_name }}</strong>
+              <span class="mono"> ${{ '%.2f'|format(r.amount) }}</span>
+              {% if r.note %}<p class="muted">{{ r.note }}</p>{% endif %}
+            </div>
+            <div class="key-actions">
+              <button class="btn-mini btn-pay-req" type="button"
+                data-req="{{ r.id }}"
+                data-name="{{ r.requester_name }}"
+                data-amount="{{ '%.2f'|format(r.amount) }}">Pagar</button>
+              <form method="post" action="{{ url_for('reject_request', req_id=r.id) }}">
+                <button class="btn-mini" type="submit">Rechazar</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if incoming_history %}
+      <h3 class="sub">Recibidas (historial)</h3>
+      <ul class="req-list">
+        {% for r in incoming_history %}
+          <li id="req-{{ r.id }}" class="req-item">
+            <div>
+              <span class="tag">{{ r.status }}</span>
+              <strong>{{ r.requester_name }}</strong>
+              <span class="mono"> ${{ '%.2f'|format(r.amount) }}</span>
+              {% if r.note %}<p class="muted">{{ r.note }}</p>{% endif %}
+            </div>
+            {% if r.status == 'paid' and r.paid_tx_id %}
+              <a class="btn-mini" href="{{ url_for('transaction_detail', tx_id=r.paid_tx_id) }}">TX</a>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if outgoing_requests %}
+      <h3 class="sub">Tus solicitudes</h3>
+      <ul class="req-list">
+        {% for r in outgoing_requests %}
+          <li id="req-out-{{ r.id }}" class="req-item">
+            <div>
+              <span class="tag">{{ r.status }}</span>
+              <strong>{{ r.payer_name }}</strong>
+              <span class="mono"> ${{ '%.2f'|format(r.amount) }}</span>
+            </div>
+            {% if r.status == 'pending' %}
+            <form method="post" action="{{ url_for('cancel_request', req_id=r.id) }}">
+              <button class="btn-mini" type="submit">Cancelar</button>
+            </form>
+            {% elif r.status == 'paid' and r.paid_tx_id %}
+            <a class="btn-mini" href="{{ url_for('transaction_detail', tx_id=r.paid_tx_id) }}">TX</a>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel wide" id="notifications">
+  <div class="trust-head">
+    <div>
+      <h2>Centro de avisos</h2>
+      <p class="muted">Transferencias, solicitudes y cambios de cuenta.</p>
+    </div>
+    {% if notifications %}
+    <form method="post" action="{{ url_for('mark_notifications_read') }}">
+      <button class="btn btn-ghost" type="submit">Marcar leídos</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if notifications %}
+    <ul class="notif-list">
+      {% for n in notifications %}
+        <li class="{% if not n.is_read %}is-unread{% endif %}">
+          <div>
+            <strong>{{ n.title }}</strong>
+            <p>{{ n.body }}</p>
+            <span class="muted mono">{{ n.created_at }}</span>
+          </div>
+          <div class="key-actions">
+            {% if n.link %}
+              <a class="btn-mini notif-jump" href="{{ n.link }}">Ver</a>
+            {% endif %}
+            {% if not n.is_read %}
+            <form method="post" action="{{ url_for('mark_one_notification_read', notif_id=n.id) }}">
+              <button class="btn-mini" type="submit">Leído</button>
+            </form>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Sin avisos todavía.</p>
+  {% endif %}
 </section>
 
 <section class="panel wide">
@@ -119,17 +312,100 @@
   <h2>Clave pública RSA</h2>
   <pre class="pem">{{ user.public_key_pem }}</pre>
 </section>
+
+{# Confirmación transferencia (1.3) #}
+<dialog class="confirm-dialog" id="transfer-confirm" aria-labelledby="confirm-title">
+  <form method="dialog" class="confirm-sheet" id="confirm-sheet">
+    <header class="confirm-head">
+      <p class="eyebrow">Paso 2 de 2</p>
+      <h2 id="confirm-title">Confirmar firma</h2>
+      <p class="muted">Revisa la orden. Al confirmar se firmará con tu clave privada RSA.</p>
+    </header>
+
+    <dl class="confirm-summary">
+      <div>
+        <dt>Destino Bre-B</dt>
+        <dd class="mono" id="sum-breb">—</dd>
+      </div>
+      <div>
+        <dt>Beneficiario</dt>
+        <dd id="sum-dest">—</dd>
+      </div>
+      <div>
+        <dt>Monto</dt>
+        <dd class="mono" id="sum-amount">—</dd>
+      </div>
+      <div>
+        <dt>Nota</dt>
+        <dd id="sum-note">—</dd>
+      </div>
+      <div>
+        <dt>Saldo después</dt>
+        <dd class="mono" id="sum-remaining">—</dd>
+      </div>
+    </dl>
+
+    <ol class="confirm-pipeline" aria-label="Lo que ocurrirá al confirmar">
+      <li><span>1</span> Serializar payload canónico</li>
+      <li><span>2</span> Firmar con RSA-PSS + SHA-256</li>
+      <li><span>3</span> Cifrar sobre híbrido para el destino</li>
+      <li><span>4</span> Actualizar saldos y registrar movimiento</li>
+    </ol>
+
+    <label class="confirm-password-label">Reingresa tu contraseña
+      <input type="password" id="confirm-password-input" autocomplete="current-password" required minlength="6" placeholder="••••••••">
+    </label>
+    <p class="confirm-error" id="confirm-error" hidden></p>
+
+    <div class="btn-row confirm-actions">
+      <button class="btn btn-ghost" type="submit" value="cancel">Cancelar</button>
+      <button class="btn" type="button" id="confirm-sign">Confirmar firma y enviar</button>
+    </div>
+  </form>
+</dialog>
+
+{# Confirmación pago de solicitud #}
+<dialog class="confirm-dialog" id="request-pay-confirm" aria-labelledby="req-pay-title">
+  <form method="post" class="confirm-sheet" id="request-pay-form" action="">
+    <header class="confirm-head">
+      <p class="eyebrow">Pagar solicitud</p>
+      <h2 id="req-pay-title">Confirmar pago</h2>
+      <p class="muted" id="req-pay-detail">—</p>
+    </header>
+    <label class="confirm-password-label">Reingresa tu contraseña
+      <input type="password" name="confirm_password" id="req-pay-password" autocomplete="current-password" required minlength="6">
+    </label>
+    <div class="btn-row confirm-actions">
+      <button class="btn btn-ghost" type="button" id="req-pay-cancel">Cancelar</button>
+      <button class="btn" type="submit">Firmar y pagar</button>
+    </div>
+  </form>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
 <script>
   document.querySelectorAll('.chip-fill').forEach((btn) => {
     btn.addEventListener('click', () => {
+      if (btn.disabled) return;
       const input = document.getElementById('receiver_breb');
       if (!input) return;
       input.value = btn.dataset.breb;
       input.dispatchEvent(new Event('input'));
     });
   });
+
+  const reqDialog = document.getElementById('request-pay-confirm');
+  const reqForm = document.getElementById('request-pay-form');
+  document.querySelectorAll('.btn-pay-req').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      reqForm.action = `/requests/${btn.dataset.req}/pay`;
+      document.getElementById('req-pay-detail').textContent =
+        `Pagarás $${btn.dataset.amount} a ${btn.dataset.name}. Se firmará con tu RSA.`;
+      document.getElementById('req-pay-password').value = '';
+      reqDialog.showModal();
+    });
+  });
+  document.getElementById('req-pay-cancel')?.addEventListener('click', () => reqDialog.close());
 </script>
 {% endblock %}

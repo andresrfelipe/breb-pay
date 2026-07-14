@@ -17,6 +17,12 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
 def init_db() -> None:
     with get_connection() as conn:
         conn.executescript(
@@ -38,6 +44,7 @@ def init_db() -> None:
                 key_value TEXT NOT NULL UNIQUE,
                 key_type TEXT NOT NULL,
                 is_active INTEGER NOT NULL DEFAULT 1,
+                is_primary INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
@@ -59,8 +66,61 @@ def init_db() -> None:
                 FOREIGN KEY (sender_id) REFERENCES users(id),
                 FOREIGN KEY (receiver_id) REFERENCES users(id)
             );
+
+            CREATE TABLE IF NOT EXISTS favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                breb_value TEXT NOT NULL,
+                alias TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(user_id, breb_value),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS payment_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                requester_id INTEGER NOT NULL,
+                payer_id INTEGER NOT NULL,
+                payer_breb TEXT NOT NULL,
+                requester_breb TEXT,
+                amount REAL NOT NULL,
+                note TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                paid_tx_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                resolved_at TEXT,
+                FOREIGN KEY (requester_id) REFERENCES users(id),
+                FOREIGN KEY (payer_id) REFERENCES users(id),
+                FOREIGN KEY (paid_tx_id) REFERENCES transactions(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                link TEXT,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
             """
         )
+        _ensure_column(conn, "breb_keys", "is_primary", "is_primary INTEGER NOT NULL DEFAULT 0")
+        # Primarias por defecto: primera llave activa de cada usuario sin primaria
+        conn.execute(
+            """
+            UPDATE breb_keys
+            SET is_primary = 1
+            WHERE id IN (
+                SELECT MIN(id) FROM breb_keys WHERE is_active = 1
+                GROUP BY user_id
+                HAVING SUM(is_primary) = 0
+            )
+            """
+        )
+        conn.commit()
 
 
 def fetch_one(query: str, params: tuple = ()) -> dict[str, Any] | None:

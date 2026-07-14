@@ -57,6 +57,20 @@ def _canonical_payload(payload: dict[str, Any]) -> bytes:
     )
 
 
+def payload_hash(payload: dict[str, Any]) -> str:
+    """SHA-256 hex del payload canónico (paso intermedio del panel de confianza)."""
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(_canonical_payload(payload))
+    return digest.finalize().hex()
+
+
+def public_key_fingerprint(public_pem: str) -> str:
+    """Huella corta SHA-256 de la clave pública (para mostrar en UI)."""
+    dig = hashes.Hash(hashes.SHA256())
+    dig.update(public_pem.encode("utf-8"))
+    return dig.finalize().hex()[:16]
+
+
 def sign_payload(private_pem: str, payload: dict[str, Any]) -> str:
     """Firma el payload con RSA-PSS. Devuelve firma en Base64."""
     private_key = _load_private(private_pem)

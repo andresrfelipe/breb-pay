@@ -53,9 +53,21 @@ def seed_demo_users() -> None:
             # Asegura llave Bre-B aunque el usuario ya exista.
             key_value = account["breb"]["key_value"]
             if not db.fetch_one("SELECT id FROM breb_keys WHERE key_value = ?", (key_value,)):
+                has_primary = db.fetch_one(
+                    "SELECT id FROM breb_keys WHERE user_id = ? AND is_primary = 1",
+                    (existing["id"],),
+                )
                 db.execute(
-                    "INSERT INTO breb_keys (user_id, key_value, key_type) VALUES (?, ?, ?)",
-                    (existing["id"], key_value, account["breb"]["key_type"]),
+                    """
+                    INSERT INTO breb_keys (user_id, key_value, key_type, is_primary)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        existing["id"],
+                        key_value,
+                        account["breb"]["key_type"],
+                        0 if has_primary else 1,
+                    ),
                 )
             continue
 
@@ -76,7 +88,10 @@ def seed_demo_users() -> None:
             ),
         )
         db.execute(
-            "INSERT INTO breb_keys (user_id, key_value, key_type) VALUES (?, ?, ?)",
+            """
+            INSERT INTO breb_keys (user_id, key_value, key_type, is_primary)
+            VALUES (?, ?, ?, 1)
+            """,
             (user_id, account["breb"]["key_value"], account["breb"]["key_type"]),
         )
 
