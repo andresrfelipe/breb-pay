@@ -271,8 +271,58 @@
   {% endif %}
 </section>
 
-<section class="panel wide">
-  <h2>Movimientos</h2>
+<section class="panel wide" id="movimientos">
+  <div class="trust-head">
+    <div>
+      <h2>Movimientos</h2>
+      <p class="muted">
+        {{ transactions|length }} resultado{% if transactions|length != 1 %}s{% endif %}
+        {% if filters_active %} · filtros activos{% endif %}
+      </p>
+    </div>
+    {% if filters_active %}
+      <a class="btn btn-ghost" href="{{ url_for('dashboard') }}#movimientos">Limpiar</a>
+    {% endif %}
+  </div>
+
+  <form class="tx-filters" method="get" action="{{ url_for('dashboard') }}#movimientos">
+    <label>Tipo
+      <select name="direction">
+        <option value="all" {% if tx_filters.direction == 'all' %}selected{% endif %}>Todos</option>
+        <option value="sent" {% if tx_filters.direction == 'sent' %}selected{% endif %}>Enviados</option>
+        <option value="received" {% if tx_filters.direction == 'received' %}selected{% endif %}>Recibidos</option>
+      </select>
+    </label>
+    <label>Desde
+      <input type="date" name="date_from" value="{{ tx_filters.date_from }}">
+    </label>
+    <label>Hasta
+      <input type="date" name="date_to" value="{{ tx_filters.date_to }}">
+    </label>
+    <label>Bre-B
+      <input name="breb" value="{{ tx_filters.breb }}" placeholder="3001…" autocomplete="off">
+    </label>
+    <label>Monto mín.
+      <input type="number" name="amount_min" min="0" step="0.01" value="{{ tx_filters.amount_min }}" placeholder="0">
+    </label>
+    <label>Monto máx.
+      <input type="number" name="amount_max" min="0" step="0.01" value="{{ tx_filters.amount_max }}" placeholder="1000000">
+    </label>
+    <label>Firma
+      <select name="signature">
+        <option value="all" {% if tx_filters.signature == 'all' %}selected{% endif %}>Todas</option>
+        <option value="valid" {% if tx_filters.signature == 'valid' %}selected{% endif %}>Válidas</option>
+        <option value="invalid" {% if tx_filters.signature == 'invalid' %}selected{% endif %}>Inválidas</option>
+      </select>
+    </label>
+    <label>Usuario
+      <input name="q" value="{{ tx_filters.q }}" placeholder="@usuario" autocomplete="off">
+    </label>
+    <div class="tx-filters-actions">
+      <button class="btn" type="submit">Filtrar</button>
+    </div>
+  </form>
+
   {% if transactions %}
     <div class="table-wrap">
       <table>
@@ -283,6 +333,7 @@
             <th>Contraparte</th>
             <th>Bre-B</th>
             <th>Monto</th>
+            <th>Firma</th>
             <th></th>
           </tr>
         </thead>
@@ -297,6 +348,13 @@
               <td class="mono {% if outgoing %}neg{% else %}pos{% endif %}">
                 {% if outgoing %}-{% else %}+{% endif %}${{ '%.2f'|format(t.amount) }}
               </td>
+              <td>
+                {% if t.signature_ok %}
+                  <span class="tag tag-primary">OK</span>
+                {% else %}
+                  <span class="tag">Falla</span>
+                {% endif %}
+              </td>
               <td><a href="{{ url_for('transaction_detail', tx_id=t.id) }}">Detalle</a></td>
             </tr>
           {% endfor %}
@@ -304,7 +362,7 @@
       </table>
     </div>
   {% else %}
-    <p class="muted">Sin movimientos.</p>
+    <p class="muted">{% if filters_active %}Ningún movimiento coincide con los filtros.{% else %}Sin movimientos.{% endif %}</p>
   {% endif %}
 </section>
 

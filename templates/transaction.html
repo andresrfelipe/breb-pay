@@ -7,7 +7,7 @@
     <h1>${{ '%.2f'|format(tx.amount) }}</h1>
     <p class="muted">@{{ tx.sender_username }} → @{{ tx.receiver_username }} · {{ tx.receiver_breb }}</p>
   </div>
-  <a class="btn btn-ghost" href="{{ url_for('dashboard') }}">Volver</a>
+  <a class="btn btn-ghost" href="{{ url_for('movements') }}">Volver</a>
 </section>
 
 {# Panel de confianza (1.1) #}
@@ -46,6 +46,31 @@
     <button class="btn btn-ghost" type="button" id="btn-tamper" data-tx="{{ tx.id }}">Simular alteración</button>
   </div>
   <pre id="verify-result" class="result-box" hidden></pre>
+</section>
+
+{# Timeline de auditoría (3.3) #}
+<section class="panel wide" id="audit-timeline" aria-label="Línea de tiempo de auditoría">
+  <div class="trust-head">
+    <div>
+      <h2>Auditoría del movimiento</h2>
+      <p class="muted">Creada → firmada → cifrada → saldos → registrada → verificada</p>
+    </div>
+  </div>
+  <ol class="audit-timeline">
+    {% for step in audit_timeline %}
+    <li class="audit-step {% if step.ok %}is-ok{% else %}is-bad{% endif %}">
+      <div class="audit-dot" aria-hidden="true"></div>
+      <div class="audit-body">
+        <div class="audit-title">
+          <strong>{{ step.title }}</strong>
+          <span class="trust-pill">{{ 'OK' if step.ok else 'FALLA' }}</span>
+        </div>
+        <p class="muted">{{ step.detail }}</p>
+        <time class="mono muted">{{ step.at }}</time>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
 </section>
 
 <section class="dash-grid">

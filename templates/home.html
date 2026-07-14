@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Inicio · BRE-PAY{% endblock %}
+{% block content %}
+<section class="dash-head">
+  <div>
+    <p class="eyebrow">Inicio</p>
+    <h1>{{ user.full_name }}</h1>
+    <p class="muted">@{{ user.username }}</p>
+  </div>
+  <div class="balance-block">
+    <span class="label">Saldo disponible</span>
+    <strong id="user-balance" data-balance="{{ user.balance }}">${{ '%.2f'|format(user.balance) }}</strong>
+    <span class="currency">COP</span>
+  </div>
+</section>
+
+<section class="dash-grid">
+  <article class="panel">
+    <h2>Acciones rápidas</h2>
+    <p class="muted">Elige una función para continuar.</p>
+    <div class="btn-row" style="margin-top:1rem">
+      <a class="btn" href="{{ url_for('send') }}">Enviar</a>
+      <a class="btn btn-ghost" href="{{ url_for('keys') }}">Llaves Bre-B</a>
+      <a class="btn btn-ghost" href="{{ url_for('movements') }}">Movimientos</a>
+      <a class="btn btn-ghost" href="{{ url_for('security') }}">Seguridad</a>
+    </div>
+  </article>
+
+  <article class="panel" id="requests">
+    <h2>Solicitar pago</h2>
+    <p class="muted">Pide dinero a otra llave Bre-B.</p>
+    <form method="post" action="{{ url_for('create_payment_request') }}" class="form">
+      <label>Bre-B del pagador
+        <input name="payer_breb" required placeholder="carlos@brepay.co">
+      </label>
+      <label>Monto (COP)
+        <input type="number" name="amount" min="0.01" step="0.01" required placeholder="50000">
+      </label>
+      <label>Nota
+        <input name="note" maxlength="120" placeholder="almuerzo">
+      </label>
+      <button class="btn" type="submit">Enviar solicitud</button>
+    </form>
+
+    {% if incoming_requests %}
+      <h3 class="sub">Por pagar</h3>
+      <ul class="req-list">
+        {% for r in incoming_requests %}
+          <li id="req-{{ r.id }}" class="req-item">
+            <div>
+              <strong>{{ r.requester_name }}</strong>
+              <span class="mono"> ${{ '%.2f'|format(r.amount) }}</span>
+              {% if r.note %}<p class="muted">{{ r.note }}</p>{% endif %}
+            </div>
+            <div class="key-actions">
+              <button class="btn-mini btn-pay-req" type="button"
+                data-req="{{ r.id }}"
+                data-name="{{ r.requester_name }}"
+                data-amount="{{ '%.2f'|format(r.amount) }}">Pagar</button>
+              <form method="post" action="{{ url_for('reject_request', req_id=r.id) }}">
+                <button class="btn-mini" type="submit">Rechazar</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if incoming_history %}
+      <h3 class="sub">Recibidas</h3>
+      <ul class="req-list">
+        {% for r in incoming_history[:5] %}
+          <li id="req-{{ r.id }}" class="req-item">
+            <div>
+              <span class="tag">{{ r.status }}</span>
+              <strong>{{ r.requester_name }}</strong>
+              <span class="mono"> ${{ '%.2f'|format(r.amount) }}</span>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if outgoing_requests %}
+      <h3 class="sub">Tus solicitudes</h3>
+      <ul class="req-list">
+        {% for r in outgoing_requests[:6] %}
+          <li id="req-out-{{ r.id }}" class="req-item">
+            <div>
+              <span class="tag">{{ r.status }}</span>
+              <strong>{{ r.payer_name }}</strong>
+              <span class="mono"> ${{ '%.2f'|format(r.amount) }}</span>
+            </div>
+            {% if r.status == 'pending' %}
+            <form method="post" action="{{ url_for('cancel_request', req_id=r.id) }}">
+              <button class="btn-mini" type="submit">Cancelar</button>
+            </form>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel wide" id="notifications">
+  <div class="trust-head">
+    <div>
+      <h2>Centro de avisos</h2>
+      <p class="muted">Transferencias y solicitudes recientes.</p>
+    </div>
+    {% if notifications %}
+    <form method="post" action="{{ url_for('mark_notifications_read') }}">
+      <button class="btn btn-ghost" type="submit">Marcar leídos</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if notifications %}
+    <ul class="notif-list">
+      {% for n in notifications[:10] %}
+        <li class="{% if not n.is_read %}is-unread{% endif %}">
+          <div>
+            <strong>{{ n.title }}</strong>
+            <p>{{ n.body }}</p>
+            <span class="muted mono">{{ n.created_at }}</span>
+          </div>
+          <div class="key-actions">
+            {% if n.link %}<a class="btn-mini notif-jump" href="{{ n.link }}">Ver</a>{% endif %}
+            {% if not n.is_read %}
+            <form method="post" action="{{ url_for('mark_one_notification_read', notif_id=n.id) }}">
+              <button class="btn-mini" type="submit">Leído</button>
+            </form>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Sin avisos todavía.</p>
+  {% endif %}
+</section>
+
+<section class="panel wide">
+  <div class="trust-head">
+    <div>
+      <h2>Últimos movimientos</h2>
+      <p class="muted">Resumen rápido · ver filtros en Movimientos</p>
+    </div>
+    <a class="btn btn-ghost" href="{{ url_for('movements') }}">Ver todos</a>
+  </div>
+  {% if recent_txs %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>Contraparte</th>
+            <th>Monto</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in recent_txs %}
+            {% set outgoing = t.sender_id == user.id %}
+            <tr>
+              <td class="mono">{{ t.created_at }}</td>
+              <td>{% if outgoing %}<span class="tag">Enviado</span>{% else %}<span class="tag tag-in">Recibido</span>{% endif %}</td>
+              <td>{% if outgoing %}@{{ t.receiver_username }}{% else %}@{{ t.sender_username }}{% endif %}</td>
+              <td class="mono">{% if outgoing %}-{% else %}+{% endif %}${{ '%.2f'|format(t.amount) }}</td>
+              <td><a href="{{ url_for('transaction_detail', tx_id=t.id) }}">Detalle</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Sin movimientos.</p>
+  {% endif %}
+</section>
+
+<dialog class="confirm-dialog" id="request-pay-confirm" aria-labelledby="req-pay-title">
+  <form method="post" class="confirm-sheet" id="request-pay-form" action="">
+    <header class="confirm-head">
+      <p class="eyebrow">Pagar solicitud</p>
+      <h2 id="req-pay-title">Confirmar pago</h2>
+      <p class="muted" id="req-pay-detail">—</p>
+    </header>
+    <label class="confirm-password-label">Reingresa tu contraseña
+      <input type="password" name="confirm_password" id="req-pay-password" autocomplete="current-password" required minlength="6">
+    </label>
+    <div class="btn-row confirm-actions">
+      <button class="btn btn-ghost" type="button" id="req-pay-cancel">Cancelar</button>
+      <button class="btn" type="submit">Firmar y pagar</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const reqDialog = document.getElementById('request-pay-confirm');
+  const reqForm = document.getElementById('request-pay-form');
+  document.querySelectorAll('.btn-pay-req').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      reqForm.action = `/requests/${btn.dataset.req}/pay`;
+      document.getElementById('req-pay-detail').textContent =
+        `Pagarás $${btn.dataset.amount} a ${btn.dataset.name}. Se firmará con tu RSA.`;
+      document.getElementById('req-pay-password').value = '';
+      reqDialog.showModal();
+    });
+  });
+  document.getElementById('req-pay-cancel')?.addEventListener('click', () => reqDialog.close());
+</script>
+{% endblock %}

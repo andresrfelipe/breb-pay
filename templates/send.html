@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Enviar · BRE-PAY{% endblock %}
+{% block content %}
+<section class="dash-head">
+  <div>
+    <p class="eyebrow">Enviar</p>
+    <h1>Transferencia Bre-B</h1>
+    <p class="muted">Wizard: destino → monto → firmar → comprobante</p>
+  </div>
+  <div class="balance-block">
+    <span class="label">Saldo disponible</span>
+    <strong id="user-balance" data-balance="{{ user.balance }}">${{ '%.2f'|format(user.balance) }}</strong>
+    <span class="currency">COP</span>
+  </div>
+</section>
+
+<section class="panel wide">
+  <ol class="wizard-steps" id="wizard-steps" aria-label="Pasos">
+    <li class="is-active" data-step-label="1">1 · Destino</li>
+    <li data-step-label="2">2 · Monto</li>
+    <li data-step-label="3">3 · Firmar</li>
+    <li data-step-label="4">4 · Listo</li>
+  </ol>
+
+  <form method="post" action="{{ url_for('transfer') }}" class="form" id="transfer-form">
+    <div class="wizard-pane" data-pane="1">
+      <h2>Destino</h2>
+      <p class="muted">Ingresa la llave Bre-B del beneficiario.</p>
+      <label>Bre-B destino
+        <input name="receiver_breb" id="receiver_breb" required placeholder="3001002001" list="breb-suggestions" autocomplete="off">
+      </label>
+      <datalist id="breb-suggestions">
+        {% for f in favorites %}
+          <option value="{{ f.breb_value }}">{{ f.alias }}</option>
+        {% endfor %}
+        {% for a in demo_accounts %}
+          <option value="{{ a.breb }}">{{ a.full_name }}</option>
+        {% endfor %}
+      </datalist>
+      <div id="breb-hint" class="breb-hint" hidden></div>
+
+      {% if favorites %}
+      <div class="demo-inline compact">
+        <p class="eyebrow">Favoritos</p>
+        <ul class="demo-chips">
+          {% for f in favorites %}
+          <li>
+            <button type="button" class="chip-fill" data-breb="{{ f.breb_value }}" {% if not f.breb_active %}disabled{% endif %}>
+              {{ f.alias }}
+              <small>{{ f.breb_value }}</small>
+            </button>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <div class="demo-inline compact">
+        <p class="eyebrow">Destinos demo</p>
+        <ul class="demo-chips">
+          {% for a in demo_accounts if a.username != user.username %}
+          <li><button type="button" class="chip-fill" data-breb="{{ a.breb }}">{{ a.breb }}</button></li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="wizard-nav">
+        <button class="btn" type="button" data-wizard-next>Continuar</button>
+      </div>
+    </div>
+
+    <div class="wizard-pane" data-pane="2" hidden>
+      <h2>Monto</h2>
+      <p class="muted">Define el valor y una nota opcional.</p>
+      <label>Monto (COP)
+        <input type="number" name="amount" id="transfer-amount" min="0.01" step="0.01" required placeholder="25000">
+      </label>
+      <label>Nota
+        <input name="note" id="transfer-note" maxlength="120" placeholder="pago">
+      </label>
+      <label>Guardar como favorito (opcional)
+        <input name="save_alias" id="save-alias" maxlength="40" placeholder="ej. Arriendo">
+      </label>
+      <div class="wizard-nav">
+        <button class="btn btn-ghost" type="button" data-wizard-back>Atrás</button>
+        <button class="btn" type="button" data-wizard-next>Revisar</button>
+      </div>
+    </div>
+
+    <div class="wizard-pane" data-pane="3" hidden>
+      <h2>Confirmar firma</h2>
+      <p class="muted">Al confirmar se firmará con tu clave privada RSA y se cifrará el payload.</p>
+      <dl class="confirm-summary">
+        <div>
+          <dt>Destino Bre-B</dt>
+          <dd class="mono" id="sum-breb">—</dd>
+        </div>
+        <div>
+          <dt>Beneficiario</dt>
+          <dd id="sum-dest">—</dd>
+        </div>
+        <div>
+          <dt>Monto</dt>
+          <dd class="mono" id="sum-amount">—</dd>
+        </div>
+        <div>
+          <dt>Nota</dt>
+          <dd id="sum-note">—</dd>
+        </div>
+        <div>
+          <dt>Saldo después</dt>
+          <dd class="mono" id="sum-remaining">—</dd>
+        </div>
+      </dl>
+      <ol class="confirm-pipeline" aria-label="Lo que ocurrirá al confirmar">
+        <li><span>1</span> Serializar payload canónico</li>
+        <li><span>2</span> Firmar con RSA-PSS + SHA-256</li>
+        <li><span>3</span> Cifrar sobre híbrido para el destino</li>
+        <li><span>4</span> Actualizar saldos y registrar movimiento</li>
+      </ol>
+      <label class="confirm-password-label">Reingresa tu contraseña
+        <input type="password" name="confirm_password" id="confirm-password-input" autocomplete="current-password" required minlength="6" placeholder="••••••••">
+      </label>
+      <p class="confirm-error" id="confirm-error" hidden></p>
+      <div class="wizard-nav">
+        <button class="btn btn-ghost" type="button" data-wizard-back>Atrás</button>
+        <button class="btn" type="submit" id="confirm-sign">Confirmar firma y enviar</button>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="dash-grid" id="contacts">
+  <article class="panel">
+    <h2>Contactos favoritos</h2>
+    <form method="post" action="{{ url_for('add_favorite') }}" class="form">
+      <label>Alias
+        <input name="alias" required maxlength="40" placeholder="Ana / Arriendo">
+      </label>
+      <label>Bre-B
+        <input name="breb_value" required placeholder="3001002001">
+      </label>
+      <button class="btn" type="submit">Guardar contacto</button>
+    </form>
+    {% if favorites %}
+      <ul class="fav-list">
+        {% for f in favorites %}
+          <li>
+            <div>
+              <strong>{{ f.alias }}</strong>
+              <code>{{ f.breb_value }}</code>
+            </div>
+            <form method="post" action="{{ url_for('delete_favorite', fav_id=f.id) }}">
+              <button class="btn-mini" type="submit">Quitar</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">Sin contactos aún.</p>
+    {% endif %}
+  </article>
+  <article class="panel">
+    <h2>Consejo de seguridad</h2>
+    <p class="muted">Cada envío exige revalidar tu contraseña, firma RSA-PSS y cifra el detalle para el destinatario.</p>
+  </article>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('.chip-fill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      const input = document.getElementById('receiver_breb');
+      if (!input) return;
+      input.value = btn.dataset.breb;
+      input.dispatchEvent(new Event('input'));
+    });
+  });
+</script>
+{% endblock %}

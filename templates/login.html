@@ -11,7 +11,7 @@
   <div class="auth-panel">
     <form method="post" class="form">
       <label>Usuario
-        <input name="username" required value="{{ preset_username or '' }}" placeholder="ana">
+        <input name="username" required value="{{ preset_username or '' }}" placeholder="usuario_ejemplo">
       </label>
       <label>Contraseña
         <input type="password" name="password" required value="{% if preset_username %}{{ demo_password }}{% endif %}" placeholder="••••••••">

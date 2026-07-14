@@ -1,5 +1,24 @@
 (() => {
-  // —— Anclas Ver (avisos → solicitud / sección) ——
+  // —— Tema dark / light (4.1) ——
+  const themeBtn = document.getElementById("theme-toggle");
+  if (themeBtn) {
+    const syncLabel = () => {
+      const t = document.documentElement.getAttribute("data-theme") || "dark";
+      themeBtn.textContent = t === "dark" ? "Claro" : "Oscuro";
+    };
+    syncLabel();
+    themeBtn.addEventListener("click", () => {
+      const cur = document.documentElement.getAttribute("data-theme") || "dark";
+      const next = cur === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      try {
+        localStorage.setItem("brepay-theme", next);
+      } catch (_) {}
+      syncLabel();
+    });
+  }
+
+  // —— Anclas Ver (avisos) ——
   function focusHashTarget() {
     const raw = window.location.hash.slice(1);
     if (!raw) return;
@@ -9,26 +28,19 @@
     el.classList.add("is-highlight");
     window.setTimeout(() => el.classList.remove("is-highlight"), 2200);
   }
-
   focusHashTarget();
   window.addEventListener("hashchange", focusHashTarget);
-
   document.querySelectorAll(".notif-jump").forEach((link) => {
     link.addEventListener("click", (e) => {
       const url = new URL(link.href, window.location.origin);
-      if (url.pathname !== window.location.pathname) return;
-      if (!url.hash) return;
-      // Misma página: forzar foco aunque el hash no cambie
+      if (url.pathname !== window.location.pathname || !url.hash) return;
       e.preventDefault();
-      if (window.location.hash === url.hash) {
-        focusHashTarget();
-      } else {
-        window.location.hash = url.hash;
-      }
+      if (window.location.hash === url.hash) focusHashTarget();
+      else window.location.hash = url.hash;
     });
   });
 
-  // —— Lookup Bre-B en vivo ——
+  // —— Lookup Bre-B ——
   const input = document.getElementById("receiver_breb");
   const hint = document.getElementById("breb-hint");
   if (input && hint) {
@@ -65,39 +77,37 @@
     });
   }
 
-  // —— Confirmación en dos pasos (1.3) ——
+  // —— Wizard de transferencia (4.3) ——
   const form = document.getElementById("transfer-form");
-  const dialog = document.getElementById("transfer-confirm");
-  if (!form || !dialog || typeof dialog.showModal !== "function") return;
+  if (!form) return;
 
-  const confirmField = document.getElementById("confirm-password-field");
+  const panes = [...form.querySelectorAll(".wizard-pane")];
+  const stepli = [...document.querySelectorAll("#wizard-steps li")];
   const passwordInput = document.getElementById("confirm-password-input");
-  const confirmSign = document.getElementById("confirm-sign");
   const confirmError = document.getElementById("confirm-error");
   const balanceEl = document.getElementById("user-balance");
-  let allowSubmit = false;
+  let step = 1;
 
   const money = (n) =>
     n.toLocaleString("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 2 });
 
-  form.addEventListener("submit", (e) => {
-    if (allowSubmit) {
-      allowSubmit = false;
-      return;
-    }
-    e.preventDefault();
+  function showStep(n) {
+    step = n;
+    panes.forEach((p) => {
+      p.hidden = Number(p.dataset.pane) !== n;
+    });
+    stepli.forEach((li, idx) => {
+      const s = idx + 1;
+      li.classList.toggle("is-active", s === n);
+      li.classList.toggle("is-done", s < n);
+    });
+  }
 
+  function fillSummary() {
     const breb = (document.getElementById("receiver_breb")?.value || "").trim();
-    const amountRaw = document.getElementById("transfer-amount")?.value || "";
+    const amount = Number(document.getElementById("transfer-amount")?.value || "");
     const note = (document.getElementById("transfer-note")?.value || "").trim() || "—";
-    const amount = Number(amountRaw);
     const balance = Number(balanceEl?.dataset.balance || "0");
-
-    if (!breb || !Number.isFinite(amount) || amount <= 0) {
-      form.reportValidity();
-      return;
-    }
-
     document.getElementById("sum-breb").textContent = breb;
     document.getElementById("sum-dest").textContent =
       hint?.dataset.found === "1" ? hint.dataset.name : "Se resolverá al enviar";
@@ -105,42 +115,53 @@
     document.getElementById("sum-note").textContent = note;
     document.getElementById("sum-remaining").textContent =
       balance >= amount ? money(balance - amount) : "Saldo insuficiente";
+  }
 
-    if (confirmField) confirmField.value = "";
-    if (passwordInput) passwordInput.value = "";
-    if (confirmError) {
-      confirmError.hidden = true;
-      confirmError.textContent = "";
-    }
-
-    dialog.showModal();
-    passwordInput?.focus();
+  form.querySelectorAll("[data-wizard-next]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (step === 1) {
+        const breb = (document.getElementById("receiver_breb")?.value || "").trim();
+        if (breb.length < 3) {
+          document.getElementById("receiver_breb")?.reportValidity();
+          return;
+        }
+        showStep(2);
+        return;
+      }
+      if (step === 2) {
+        const amountEl = document.getElementById("transfer-amount");
+        if (!amountEl?.checkValidity()) {
+          amountEl?.reportValidity();
+          return;
+        }
+        fillSummary();
+        showStep(3);
+        passwordInput?.focus();
+      }
+    });
   });
 
-  confirmSign?.addEventListener("click", () => {
+  form.querySelectorAll("[data-wizard-back]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (step > 1) showStep(step - 1);
+    });
+  });
+
+  form.addEventListener("submit", (e) => {
+    if (step !== 3) {
+      e.preventDefault();
+      return;
+    }
     const pwd = (passwordInput?.value || "").trim();
     if (pwd.length < 6) {
+      e.preventDefault();
       if (confirmError) {
         confirmError.hidden = false;
         confirmError.textContent = "Ingresa tu contraseña (mín. 6 caracteres) para autorizar la firma.";
       }
       passwordInput?.focus();
-      return;
-    }
-    if (confirmField) confirmField.value = pwd;
-    allowSubmit = true;
-    dialog.close();
-    form.requestSubmit();
-  });
-
-  dialog.addEventListener("close", () => {
-    if (passwordInput) passwordInput.value = "";
-  });
-
-  passwordInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      confirmSign?.click();
     }
   });
+
+  showStep(1);
 })();

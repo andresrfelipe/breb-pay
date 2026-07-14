@@ -37,6 +37,7 @@ def inject_globals():
         "demo_accounts": seed.public_demo_accounts(),
         "demo_password": seed.DEMO_PASSWORD,
         "unread_notifications": unread,
+        "nav_active": None,
     }
 
 
@@ -71,6 +72,63 @@ def normalize_breb(value: str) -> str:
     return value.strip().lower()
 
 
+def suggest_breb_placeholders(username: str) -> dict[str, str]:
+    """Placeholders por tipo; alfanumérica sugerida a partir del username."""
+    handle = re.sub(r"[^a-z0-9_]", "", (username or "").lower()) or "usuario"
+    if not re.search(r"[a-z]", handle):
+        handle = f"user{handle}"
+    if not re.search(r"[0-9]", handle):
+        handle = f"{handle}01"
+    return {
+        "telefono": "3000000000",
+        "documento": "1000000",
+        "email": "example@example.com",
+        "alfanumerica": f"@{handle}",
+    }
+
+
+def normalize_breb_for_type(key_type: str, key_value: str) -> tuple[str | None, str | None]:
+    """
+    Normaliza y valida el valor según tipo.
+    Devuelve (valor_ok, mensaje_error).
+    """
+    value = normalize_breb(key_value)
+    if not value:
+        return None, "Indica un valor para la llave Bre-B."
+
+    if key_type == "alfanumerica":
+        if not value.startswith("@"):
+            value = "@" + value.lstrip("@")
+        body = value[1:]
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{1,78}", body):
+            return None, "Alfanumérica inválida: usa @usuario (letras, números, _ . -)."
+        if not re.search(r"[a-z]", body) or not re.search(r"[0-9]", body):
+            return None, "Alfanumérica inválida: debe incluir letras y números (ej. @adrian231)."
+        return value, None
+
+    if value.startswith("@"):
+        return None, "Solo las llaves alfanuméricas usan @ al inicio."
+
+    if key_type == "telefono":
+        digits = re.sub(r"\D", "", value)
+        if len(digits) < 7 or len(digits) > 15:
+            return None, "Teléfono inválido: usa entre 7 y 15 dígitos."
+        return digits, None
+
+    if key_type == "documento":
+        digits = re.sub(r"\D", "", value)
+        if len(digits) < 5 or len(digits) > 20:
+            return None, "Documento inválido: usa entre 5 y 20 dígitos."
+        return digits, None
+
+    if key_type == "email":
+        if not re.fullmatch(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", value):
+            return None, "Email inválido."
+        return value, None
+
+    return value, None
+
+
 def money(amount: float) -> str:
     return f"${amount:,.2f}"
 
@@ -96,6 +154,164 @@ def primary_breb_for(user_id: int) -> str | None:
         (user_id,),
     )
     return row["key_value"] if row else None
+
+
+def load_favorites(user_id: int) -> list[dict]:
+    return db.fetch_all(
+        """
+        SELECT f.*, b.key_type, u.full_name AS owner_name, u.username AS owner_username,
+               COALESCE(b.is_active, 0) AS breb_active
+        FROM favorites f
+        LEFT JOIN breb_keys b ON b.key_value = f.breb_value
+        LEFT JOIN users u ON u.id = b.user_id
+        WHERE f.user_id = ?
+        ORDER BY f.alias ASC
+        """,
+        (user_id,),
+    )
+
+
+def load_request_bundles(user_id: int) -> tuple[list, list, list]:
+    incoming_requests = db.fetch_all(
+        """
+        SELECT pr.*,
+               u.full_name AS requester_name,
+               u.username AS requester_username
+        FROM payment_requests pr
+        JOIN users u ON u.id = pr.requester_id
+        WHERE pr.payer_id = ? AND pr.status = 'pending'
+        ORDER BY pr.created_at DESC
+        """,
+        (user_id,),
+    )
+    incoming_history = db.fetch_all(
+        """
+        SELECT pr.*,
+               u.full_name AS requester_name,
+               u.username AS requester_username
+        FROM payment_requests pr
+        JOIN users u ON u.id = pr.requester_id
+        WHERE pr.payer_id = ? AND pr.status != 'pending'
+        ORDER BY COALESCE(pr.resolved_at, pr.created_at) DESC
+        LIMIT 15
+        """,
+        (user_id,),
+    )
+    outgoing_requests = db.fetch_all(
+        """
+        SELECT pr.*,
+               u.full_name AS payer_name,
+               u.username AS payer_username
+        FROM payment_requests pr
+        JOIN users u ON u.id = pr.payer_id
+        WHERE pr.requester_id = ?
+        ORDER BY pr.created_at DESC
+        LIMIT 20
+        """,
+        (user_id,),
+    )
+    return incoming_requests, incoming_history, outgoing_requests
+
+
+def query_transactions(user_id: int) -> tuple[dict, list, bool]:
+    tx_filters = {
+        "direction": request.args.get("direction", "all").strip().lower() or "all",
+        "date_from": request.args.get("date_from", "").strip(),
+        "date_to": request.args.get("date_to", "").strip(),
+        "breb": normalize_breb(request.args.get("breb", "")),
+        "amount_min": request.args.get("amount_min", "").strip(),
+        "amount_max": request.args.get("amount_max", "").strip(),
+        "signature": request.args.get("signature", "all").strip().lower() or "all",
+        "q": request.args.get("q", "").strip().lower(),
+    }
+    if tx_filters["direction"] not in {"all", "sent", "received"}:
+        tx_filters["direction"] = "all"
+    if tx_filters["signature"] not in {"all", "valid", "invalid"}:
+        tx_filters["signature"] = "all"
+
+    clauses: list[str] = []
+    params: list = []
+    if tx_filters["direction"] == "sent":
+        clauses.append("t.sender_id = ?")
+        params.append(user_id)
+    elif tx_filters["direction"] == "received":
+        clauses.append("t.receiver_id = ?")
+        params.append(user_id)
+    else:
+        clauses.append("(t.sender_id = ? OR t.receiver_id = ?)")
+        params.extend([user_id, user_id])
+
+    if tx_filters["date_from"]:
+        clauses.append("date(t.created_at) >= date(?)")
+        params.append(tx_filters["date_from"])
+    if tx_filters["date_to"]:
+        clauses.append("date(t.created_at) <= date(?)")
+        params.append(tx_filters["date_to"])
+    if tx_filters["breb"]:
+        clauses.append("(lower(t.receiver_breb) LIKE ? OR lower(COALESCE(t.sender_breb, '')) LIKE ?)")
+        like = f"%{tx_filters['breb']}%"
+        params.extend([like, like])
+    if tx_filters["amount_min"]:
+        try:
+            clauses.append("t.amount >= ?")
+            params.append(float(tx_filters["amount_min"]))
+        except ValueError:
+            pass
+    if tx_filters["amount_max"]:
+        try:
+            clauses.append("t.amount <= ?")
+            params.append(float(tx_filters["amount_max"]))
+        except ValueError:
+            pass
+    if tx_filters["q"]:
+        clauses.append("(lower(s.username) LIKE ? OR lower(r.username) LIKE ?)")
+        like_q = f"%{tx_filters['q']}%"
+        params.extend([like_q, like_q])
+
+    where_sql = " AND ".join(clauses)
+    txs = db.fetch_all(
+        f"""
+        SELECT t.*,
+               s.username AS sender_username,
+               s.public_key_pem AS sender_public_key,
+               r.username AS receiver_username
+        FROM transactions t
+        JOIN users s ON s.id = t.sender_id
+        JOIN users r ON r.id = t.receiver_id
+        WHERE {where_sql}
+        ORDER BY t.created_at DESC
+        LIMIT 200
+        """,
+        tuple(params),
+    )
+
+    for t in txs:
+        try:
+            payload = json.loads(t["payload_json"])
+            t["signature_ok"] = crypto_service.verify_signature(
+                t["sender_public_key"], payload, t["signature_b64"]
+            )
+        except Exception:
+            t["signature_ok"] = False
+
+    if tx_filters["signature"] == "valid":
+        txs = [t for t in txs if t["signature_ok"]]
+    elif tx_filters["signature"] == "invalid":
+        txs = [t for t in txs if not t["signature_ok"]]
+
+    filters_active = any(
+        [
+            tx_filters["direction"] != "all",
+            tx_filters["date_from"],
+            tx_filters["date_to"],
+            tx_filters["breb"],
+            tx_filters["amount_min"],
+            tx_filters["amount_max"],
+            tx_filters["signature"] != "all",
+            tx_filters["q"],
+        ]
+    )
+    return tx_filters, txs, filters_active
 
 
 def execute_signed_transfer(
@@ -171,7 +387,7 @@ def ensure_db():
 @app.route("/")
 def index():
     if "user_id" in session:
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
     return render_template("index.html", landing=True)
 
 
@@ -214,7 +430,7 @@ def register():
 
     session["user_id"] = user_id
     flash("Cuenta creada. Se generó tu par de claves RSA automáticamente.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("home"))
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -233,7 +449,7 @@ def login():
 
     session["user_id"] = user["id"]
     flash(f"Bienvenido, {user['full_name']}.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("home"))
 
 
 @app.route("/logout")
@@ -246,61 +462,14 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    return redirect(url_for("home"))
+
+
+@app.route("/home")
+@login_required
+def home():
     user = current_user()
-    keys = db.fetch_all(
-        "SELECT * FROM breb_keys WHERE user_id = ? ORDER BY is_primary DESC, created_at DESC",
-        (user["id"],),
-    )
-    favorites = db.fetch_all(
-        """
-        SELECT f.*, b.key_type, u.full_name AS owner_name, u.username AS owner_username,
-               COALESCE(b.is_active, 0) AS breb_active
-        FROM favorites f
-        LEFT JOIN breb_keys b ON b.key_value = f.breb_value
-        LEFT JOIN users u ON u.id = b.user_id
-        WHERE f.user_id = ?
-        ORDER BY f.alias ASC
-        """,
-        (user["id"],),
-    )
-    incoming_requests = db.fetch_all(
-        """
-        SELECT pr.*,
-               u.full_name AS requester_name,
-               u.username AS requester_username
-        FROM payment_requests pr
-        JOIN users u ON u.id = pr.requester_id
-        WHERE pr.payer_id = ? AND pr.status = 'pending'
-        ORDER BY pr.created_at DESC
-        """,
-        (user["id"],),
-    )
-    incoming_history = db.fetch_all(
-        """
-        SELECT pr.*,
-               u.full_name AS requester_name,
-               u.username AS requester_username
-        FROM payment_requests pr
-        JOIN users u ON u.id = pr.requester_id
-        WHERE pr.payer_id = ? AND pr.status != 'pending'
-        ORDER BY COALESCE(pr.resolved_at, pr.created_at) DESC
-        LIMIT 15
-        """,
-        (user["id"],),
-    )
-    outgoing_requests = db.fetch_all(
-        """
-        SELECT pr.*,
-               u.full_name AS payer_name,
-               u.username AS payer_username
-        FROM payment_requests pr
-        JOIN users u ON u.id = pr.payer_id
-        WHERE pr.requester_id = ?
-        ORDER BY pr.created_at DESC
-        LIMIT 20
-        """,
-        (user["id"],),
-    )
+    incoming_requests, incoming_history, outgoing_requests = load_request_bundles(user["id"])
     notifications = db.fetch_all(
         """
         SELECT * FROM notifications
@@ -310,7 +479,7 @@ def dashboard():
         """,
         (user["id"],),
     )
-    txs = db.fetch_all(
+    recent_txs = db.fetch_all(
         """
         SELECT t.*,
                s.username AS sender_username,
@@ -320,21 +489,103 @@ def dashboard():
         JOIN users r ON r.id = t.receiver_id
         WHERE t.sender_id = ? OR t.receiver_id = ?
         ORDER BY t.created_at DESC
-        LIMIT 50
+        LIMIT 8
         """,
         (user["id"], user["id"]),
     )
     return render_template(
-        "dashboard.html",
+        "home.html",
         user=user,
-        keys=keys,
-        favorites=favorites,
         incoming_requests=incoming_requests,
         incoming_history=incoming_history,
         outgoing_requests=outgoing_requests,
         notifications=notifications,
-        transactions=txs,
+        recent_txs=recent_txs,
+        nav_active="home",
+    )
+
+
+@app.route("/send")
+@login_required
+def send():
+    user = current_user()
+    return render_template(
+        "send.html",
+        user=user,
+        favorites=load_favorites(user["id"]),
+        nav_active="send",
+    )
+
+
+@app.route("/send/success/<int:tx_id>")
+@login_required
+def send_success(tx_id: int):
+    user = current_user()
+    tx = db.fetch_one(
+        """
+        SELECT t.*, r.full_name AS receiver_name, r.username AS receiver_username
+        FROM transactions t
+        JOIN users r ON r.id = t.receiver_id
+        WHERE t.id = ?
+        """,
+        (tx_id,),
+    )
+    if not tx or tx["sender_id"] != user["id"]:
+        flash("Comprobante no disponible.", "error")
+        return redirect(url_for("send"))
+    return render_template(
+        "send_success.html",
+        user=user,
+        tx=tx,
+        receiver_name=tx["receiver_name"],
+        receiver_username=tx["receiver_username"],
+        nav_active="send",
+    )
+
+
+@app.route("/keys")
+@login_required
+def keys():
+    user = current_user()
+    keys = db.fetch_all(
+        "SELECT * FROM breb_keys WHERE user_id = ? ORDER BY is_primary DESC, created_at DESC",
+        (user["id"],),
+    )
+    return render_template(
+        "keys.html",
+        user=user,
+        keys=keys,
         breb_types=sorted(BREB_TYPES),
+        breb_placeholders=suggest_breb_placeholders(user["username"]),
+        nav_active="keys",
+    )
+
+
+@app.route("/movements")
+@login_required
+def movements():
+    user = current_user()
+    tx_filters, txs, filters_active = query_transactions(user["id"])
+    return render_template(
+        "movements.html",
+        user=user,
+        transactions=txs,
+        tx_filters=tx_filters,
+        filters_active=filters_active,
+        nav_active="movements",
+    )
+
+
+@app.route("/security")
+@login_required
+def security():
+    user = current_user()
+    fingerprint = crypto_service.public_key_fingerprint(user["public_key_pem"])
+    return render_template(
+        "security.html",
+        user=user,
+        fingerprint=fingerprint,
+        nav_active="security",
     )
 
 
@@ -343,19 +594,24 @@ def dashboard():
 def create_breb():
     user = current_user()
     key_type = request.form.get("key_type", "").strip().lower()
-    key_value = normalize_breb(request.form.get("key_value", ""))
+    raw_value = request.form.get("key_value", "")
 
-    if key_type not in BREB_TYPES or not key_value:
-        flash("Tipo o valor de llave Bre-B inválido.", "error")
-        return redirect(url_for("dashboard"))
+    if key_type not in BREB_TYPES:
+        flash("Tipo de llave Bre-B inválido.", "error")
+        return redirect(url_for("keys"))
+
+    key_value, err = normalize_breb_for_type(key_type, raw_value)
+    if err or not key_value:
+        flash(err or "Valor de llave Bre-B inválido.", "error")
+        return redirect(url_for("keys"))
 
     if len(key_value) < 3 or len(key_value) > 80:
         flash("La llave Bre-B debe tener entre 3 y 80 caracteres.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("keys"))
 
     if db.fetch_one("SELECT id FROM breb_keys WHERE key_value = ?", (key_value,)):
         flash("Esa llave Bre-B ya está registrada.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("keys"))
 
     has_primary = db.fetch_one(
         "SELECT id FROM breb_keys WHERE user_id = ? AND is_primary = 1",
@@ -368,7 +624,7 @@ def create_breb():
         (user["id"], key_value, key_type, is_primary),
     )
     flash(f"Llave Bre-B '{key_value}' creada.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("keys"))
 
 
 @app.route("/breb/<int:key_id>/toggle", methods=["POST"])
@@ -378,7 +634,7 @@ def toggle_breb(key_id: int):
     key = db.fetch_one("SELECT * FROM breb_keys WHERE id = ? AND user_id = ?", (key_id, user["id"]))
     if not key:
         flash("Llave no encontrada.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("keys"))
 
     new_active = 0 if key["is_active"] else 1
     if not new_active and key["is_primary"]:
@@ -400,14 +656,14 @@ def toggle_breb(key_id: int):
                 conn.execute("UPDATE breb_keys SET is_primary = 1 WHERE id = ?", (other["id"],))
             conn.commit()
         flash(f"Llave '{key['key_value']}' desactivada.", "success")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("keys"))
 
     db.execute("UPDATE breb_keys SET is_active = ? WHERE id = ?", (new_active, key_id))
     flash(
         f"Llave '{key['key_value']}' {'activada' if new_active else 'desactivada'}.",
         "success",
     )
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("keys"))
 
 
 @app.route("/breb/<int:key_id>/primary", methods=["POST"])
@@ -417,10 +673,10 @@ def set_primary_breb(key_id: int):
     key = db.fetch_one("SELECT * FROM breb_keys WHERE id = ? AND user_id = ?", (key_id, user["id"]))
     if not key:
         flash("Llave no encontrada.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("keys"))
     if not key["is_active"]:
         flash("Activa la llave antes de marcarla como primaria.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("keys"))
 
     with db.get_connection() as conn:
         conn.execute("UPDATE breb_keys SET is_primary = 0 WHERE user_id = ?", (user["id"],))
@@ -428,7 +684,7 @@ def set_primary_breb(key_id: int):
         conn.commit()
 
     flash(f"'{key['key_value']}' es ahora tu llave Bre-B primaria.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("keys"))
 
 
 @app.route("/favorites", methods=["POST"])
@@ -440,7 +696,7 @@ def add_favorite():
 
     if not breb_value or not alias:
         flash("Indica alias y llave Bre-B para el favorito.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
 
     target = db.fetch_one(
         "SELECT * FROM breb_keys WHERE key_value = ? AND is_active = 1",
@@ -448,10 +704,10 @@ def add_favorite():
     )
     if not target:
         flash("Esa llave Bre-B no existe o está inactiva.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
     if target["user_id"] == user["id"]:
         flash("No puedes guardar tu propia llave como favorito.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
 
     existing = db.fetch_one(
         "SELECT id FROM favorites WHERE user_id = ? AND breb_value = ?",
@@ -469,7 +725,7 @@ def add_favorite():
             (user["id"], breb_value, alias),
         )
         flash(f"Contacto '{alias}' guardado.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("send"))
 
 
 @app.route("/favorites/<int:fav_id>/delete", methods=["POST"])
@@ -479,10 +735,10 @@ def delete_favorite(fav_id: int):
     fav = db.fetch_one("SELECT * FROM favorites WHERE id = ? AND user_id = ?", (fav_id, user["id"]))
     if not fav:
         flash("Favorito no encontrado.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
     db.execute("DELETE FROM favorites WHERE id = ?", (fav_id,))
     flash(f"Contacto '{fav['alias']}' eliminado.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("send"))
 
 
 @app.route("/transfer", methods=["POST"])
@@ -499,16 +755,16 @@ def transfer():
         amount = float(amount_raw)
     except ValueError:
         flash("Monto inválido.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
 
     if amount <= 0:
         flash("El monto debe ser mayor a cero.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
 
     sender = db.fetch_one("SELECT * FROM users WHERE id = ?", (user["id"],))
     if not confirm_password or not check_password_hash(sender["password_hash"], confirm_password):
         flash("Confirmación requerida: reingresa tu contraseña para firmar la transferencia.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
 
     breb = db.fetch_one(
         "SELECT * FROM breb_keys WHERE key_value = ? AND is_active = 1",
@@ -516,17 +772,17 @@ def transfer():
     )
     if not breb:
         flash("Llave Bre-B de destino no encontrada.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
 
     if breb["user_id"] == user["id"]:
         flash("No puedes transferirte a ti mismo.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
 
     receiver = db.fetch_one("SELECT * FROM users WHERE id = ?", (breb["user_id"],))
 
     if sender["balance"] < amount:
         flash("Saldo insuficiente.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("send"))
 
     tx_id = execute_signed_transfer(sender, receiver, receiver_breb, amount, note)
 
@@ -562,7 +818,7 @@ def transfer():
         f"Dinero enviado a {receiver['full_name']} · {money(amount)} COP",
         "success",
     )
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("send_success", tx_id=tx_id))
 
 
 @app.route("/requests", methods=["POST"])
@@ -577,11 +833,11 @@ def create_payment_request():
         amount = float(amount_raw)
     except ValueError:
         flash("Monto inválido en la solicitud.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     if amount <= 0:
         flash("El monto de la solicitud debe ser mayor a cero.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     breb = db.fetch_one(
         "SELECT * FROM breb_keys WHERE key_value = ? AND is_active = 1",
@@ -589,10 +845,10 @@ def create_payment_request():
     )
     if not breb:
         flash("Llave Bre-B del pagador no encontrada.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
     if breb["user_id"] == user["id"]:
         flash("No puedes solicitarte un pago a ti mismo.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     req_id = db.execute(
         """
@@ -615,10 +871,10 @@ def create_payment_request():
         "request_in",
         "Nueva solicitud de pago",
         f"{user['full_name']} te solicita {money(amount)} vía Bre-B.",
-        url_for("dashboard") + f"#req-{req_id}",
+        url_for("home") + f"#req-{req_id}",
     )
     flash(f"Solicitud de {money(amount)} enviada a '{payer_breb}'.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("home"))
 
 
 @app.route("/requests/<int:req_id>/pay", methods=["POST"])
@@ -629,12 +885,12 @@ def pay_request(req_id: int):
     pr = db.fetch_one("SELECT * FROM payment_requests WHERE id = ?", (req_id,))
     if not pr or pr["payer_id"] != user["id"] or pr["status"] != "pending":
         flash("Solicitud no disponible.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     payer = db.fetch_one("SELECT * FROM users WHERE id = ?", (user["id"],))
     if not confirm_password or not check_password_hash(payer["password_hash"], confirm_password):
         flash("Confirma tu contraseña para firmar el pago de la solicitud.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     requester = db.fetch_one("SELECT * FROM users WHERE id = ?", (pr["requester_id"],))
     # El pagador envía al solicitante usando la Bre-B del solicitante (o su primaria)
@@ -649,11 +905,11 @@ def pay_request(req_id: int):
 
     if not receiver_breb:
         flash("El solicitante no tiene una llave Bre-B activa para recibir.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     if payer["balance"] < pr["amount"]:
         flash("Saldo insuficiente para pagar la solicitud.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     note = pr["note"] or f"pago solicitud #{pr['id']}"
     tx_id = execute_signed_transfer(payer, requester, receiver_breb, pr["amount"], note)
@@ -686,7 +942,7 @@ def pay_request(req_id: int):
         f"Dinero enviado a {requester['full_name']} · {money(pr['amount'])} COP",
         "success",
     )
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("home"))
 
 
 @app.route("/requests/<int:req_id>/reject", methods=["POST"])
@@ -696,7 +952,7 @@ def reject_request(req_id: int):
     pr = db.fetch_one("SELECT * FROM payment_requests WHERE id = ?", (req_id,))
     if not pr or pr["payer_id"] != user["id"] or pr["status"] != "pending":
         flash("Solicitud no disponible.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     db.execute(
         """
@@ -711,10 +967,10 @@ def reject_request(req_id: int):
         "request_rejected",
         "Solicitud rechazada",
         f"{user['full_name']} rechazó tu solicitud de {money(pr['amount'])}.",
-        url_for("dashboard") + f"#req-out-{req_id}",
+        url_for("home") + f"#req-out-{req_id}",
     )
     flash("Solicitud rechazada.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("home"))
 
 
 @app.route("/requests/<int:req_id>/cancel", methods=["POST"])
@@ -724,7 +980,7 @@ def cancel_request(req_id: int):
     pr = db.fetch_one("SELECT * FROM payment_requests WHERE id = ?", (req_id,))
     if not pr or pr["requester_id"] != user["id"] or pr["status"] != "pending":
         flash("No puedes cancelar esa solicitud.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     db.execute(
         """
@@ -735,7 +991,7 @@ def cancel_request(req_id: int):
         (req_id,),
     )
     flash("Solicitud cancelada.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("home"))
 
 
 @app.route("/notifications/read", methods=["POST"])
@@ -747,7 +1003,7 @@ def mark_notifications_read():
         (user["id"],),
     )
     flash("Avisos marcados como leídos.", "success")
-    return redirect(url_for("dashboard") + "#notifications")
+    return redirect(url_for("home") + "#notifications")
 
 
 @app.route("/notifications/<int:notif_id>/read", methods=["POST"])
@@ -758,7 +1014,7 @@ def mark_one_notification_read(notif_id: int):
         "UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
         (notif_id, user["id"]),
     )
-    return redirect(url_for("dashboard") + "#notifications")
+    return redirect(url_for("home") + "#notifications")
 
 
 @app.route("/transaction/<int:tx_id>")
@@ -780,11 +1036,11 @@ def transaction_detail(tx_id: int):
     )
     if not tx:
         flash("Transacción no encontrada.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("movements"))
 
     if user["id"] not in (tx["sender_id"], tx["receiver_id"]):
         flash("No tienes permiso para ver esta transacción.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("movements"))
 
     payload = json.loads(tx["payload_json"])
     signature_ok = crypto_service.verify_signature(
@@ -854,6 +1110,64 @@ def transaction_detail(tx_id: int):
         },
     ]
 
+    # —— Timeline de auditoría (3.3) ——
+    order_ts = payload.get("timestamp") or tx["created_at"]
+    recorded_ts = tx["created_at"]
+    audit_timeline = [
+        {
+            "title": "Orden creada",
+            "detail": f"txid {payload.get('txid', '—')} · {money(float(payload.get('amount', tx['amount'])))} COP",
+            "at": order_ts,
+            "ok": True,
+        },
+        {
+            "title": "Payload canónico",
+            "detail": "Serialización JSON ordenada lista para firma.",
+            "at": order_ts,
+            "ok": True,
+        },
+        {
+            "title": "Firmada (RSA-PSS + SHA-256)",
+            "detail": f"Remitente @{tx['sender_username']} · fingerprint {sender_fingerprint}",
+            "at": order_ts,
+            "ok": bool(tx["signature_b64"]),
+        },
+        {
+            "title": "Cifrada (RSA-OAEP + AES-GCM)",
+            "detail": "Sobre híbrido destinado a la clave pública del receptor.",
+            "at": order_ts,
+            "ok": bool(tx["encrypted_key"] and tx["ciphertext"]),
+        },
+        {
+            "title": "Saldo debitado",
+            "detail": f"-{money(tx['amount'])} de @{tx['sender_username']}",
+            "at": recorded_ts,
+            "ok": tx["status"] == "completed",
+        },
+        {
+            "title": "Saldo acreditado",
+            "detail": f"+{money(tx['amount'])} a @{tx['receiver_username']} · Bre-B {tx['receiver_breb']}",
+            "at": recorded_ts,
+            "ok": tx["status"] == "completed",
+        },
+        {
+            "title": "Registrada en historial",
+            "detail": f"Movimiento #{tx['id']} · estado {tx['status']}",
+            "at": recorded_ts,
+            "ok": True,
+        },
+        {
+            "title": "Firma verificada",
+            "detail": (
+                "Integridad y autenticidad confirmadas con la clave pública."
+                if signature_ok
+                else "La verificación de firma falló."
+            ),
+            "at": datetime.now(timezone.utc).isoformat(),
+            "ok": signature_ok,
+        },
+    ]
+
     return render_template(
         "transaction.html",
         user=user,
@@ -863,6 +1177,7 @@ def transaction_detail(tx_id: int):
         decrypted=decrypted,
         decrypt_error=decrypt_error,
         trust_steps=trust_steps,
+        audit_timeline=audit_timeline,
         payload_digest=payload_digest,
         sender_fingerprint=sender_fingerprint,
     )
@@ -929,6 +1244,250 @@ def lookup_breb():
     if not row:
         return jsonify({"found": False})
     return jsonify({"found": True, "key": dict(row)})
+
+
+@app.route("/api/health")
+def api_health():
+    return jsonify({"ok": True, "service": "bre-pay", "version": "1.0.0"})
+
+
+@app.route("/api/me")
+@login_required
+def api_me():
+    user = current_user()
+    keys = db.fetch_all(
+        "SELECT key_value, key_type, is_active, is_primary FROM breb_keys WHERE user_id = ?",
+        (user["id"],),
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "full_name": user["full_name"],
+                "balance": user["balance"],
+                "breb_keys": keys,
+            },
+        }
+    )
+
+
+@app.route("/api/transactions")
+@login_required
+def api_transactions():
+    user = current_user()
+    _, txs, _ = query_transactions(user["id"])
+    slim = [
+        {
+            "id": t["id"],
+            "amount": t["amount"],
+            "sender_username": t["sender_username"],
+            "receiver_username": t["receiver_username"],
+            "receiver_breb": t["receiver_breb"],
+            "status": t["status"],
+            "created_at": t["created_at"],
+            "signature_ok": t.get("signature_ok"),
+            "direction": "sent" if t["sender_id"] == user["id"] else "received",
+        }
+        for t in txs
+    ]
+    return jsonify({"ok": True, "count": len(slim), "transactions": slim})
+
+
+@app.route("/api/transfers", methods=["POST"])
+@login_required
+def api_transfers():
+    """Transferencia vía JSON (mismo flujo cripto que el formulario web)."""
+    user = current_user()
+    body = request.get_json(silent=True) or {}
+    receiver_breb = normalize_breb(str(body.get("receiver_breb", "")))
+    note = str(body.get("note", ""))[:120]
+    confirm_password = str(body.get("confirm_password", ""))
+
+    try:
+        amount = float(body.get("amount"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Monto inválido"}), 400
+
+    if amount <= 0:
+        return jsonify({"ok": False, "error": "El monto debe ser mayor a cero"}), 400
+
+    sender = db.fetch_one("SELECT * FROM users WHERE id = ?", (user["id"],))
+    if not confirm_password or not check_password_hash(sender["password_hash"], confirm_password):
+        return jsonify({"ok": False, "error": "Confirmación de contraseña requerida"}), 401
+
+    breb = db.fetch_one(
+        "SELECT * FROM breb_keys WHERE key_value = ? AND is_active = 1",
+        (receiver_breb,),
+    )
+    if not breb:
+        return jsonify({"ok": False, "error": "Llave Bre-B no encontrada"}), 404
+    if breb["user_id"] == user["id"]:
+        return jsonify({"ok": False, "error": "No puedes transferirte a ti mismo"}), 400
+
+    receiver = db.fetch_one("SELECT * FROM users WHERE id = ?", (breb["user_id"],))
+    if sender["balance"] < amount:
+        return jsonify({"ok": False, "error": "Saldo insuficiente"}), 400
+
+    tx_id = execute_signed_transfer(sender, receiver, receiver_breb, amount, note)
+    notify(
+        receiver["id"],
+        "transfer_in",
+        "Dinero recibido",
+        f"Recibiste {money(amount)} de {sender['full_name']} (@{sender['username']}).",
+        url_for("transaction_detail", tx_id=tx_id),
+    )
+    notify(
+        sender["id"],
+        "transfer_out",
+        "Dinero enviado",
+        f"Enviaste {money(amount)} a {receiver['full_name']} ({receiver_breb}).",
+        url_for("transaction_detail", tx_id=tx_id),
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "tx_id": tx_id,
+            "amount": amount,
+            "receiver_breb": receiver_breb,
+            "receiver_username": receiver["username"],
+            "security": {
+                "signature": "RSA-PSS",
+                "encryption": "RSA-OAEP+AES-GCM",
+                "balances_updated": True,
+            },
+        }
+    ), 201
+
+
+@app.route("/api/openapi.json")
+def openapi_spec():
+    return jsonify(
+        {
+            "openapi": "3.0.3",
+            "info": {
+                "title": "BRE-PAY API",
+                "version": "1.0.0",
+                "description": (
+                    "API REST del prototipo Bre-B + RSA. "
+                    "Las rutas autenticadas usan la cookie de sesión de Flask "
+                    "(iniciar sesión en la web primero)."
+                ),
+            },
+            "servers": [{"url": "http://127.0.0.1:5001", "description": "Local"}],
+            "tags": [
+                {"name": "salud"},
+                {"name": "cuenta"},
+                {"name": "breb"},
+                {"name": "transferencias"},
+                {"name": "criptografia"},
+            ],
+            "paths": {
+                "/api/health": {
+                    "get": {
+                        "tags": ["salud"],
+                        "summary": "Healthcheck",
+                        "responses": {"200": {"description": "Servicio activo"}},
+                    }
+                },
+                "/api/me": {
+                    "get": {
+                        "tags": ["cuenta"],
+                        "summary": "Perfil y llaves Bre-B del usuario autenticado",
+                        "responses": {
+                            "200": {"description": "OK"},
+                            "302": {"description": "Sin sesión → login"},
+                        },
+                    }
+                },
+                "/api/transactions": {
+                    "get": {
+                        "tags": ["transferencias"],
+                        "summary": "Listar movimientos (soporta mismos filtros query que /movements)",
+                        "responses": {"200": {"description": "Lista de transacciones"}},
+                    }
+                },
+                "/api/transfers": {
+                    "post": {
+                        "tags": ["transferencias"],
+                        "summary": "Crear transferencia firmada y cifrada",
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": [
+                                            "receiver_breb",
+                                            "amount",
+                                            "confirm_password",
+                                        ],
+                                        "properties": {
+                                            "receiver_breb": {"type": "string"},
+                                            "amount": {"type": "number"},
+                                            "note": {"type": "string"},
+                                            "confirm_password": {"type": "string"},
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {
+                            "201": {"description": "Transferencia creada"},
+                            "400": {"description": "Error de validación / saldo"},
+                            "401": {"description": "Contraseña de confirmación inválida"},
+                        },
+                    }
+                },
+                "/api/lookup-breb": {
+                    "get": {
+                        "tags": ["breb"],
+                        "summary": "Resolver llave Bre-B activa",
+                        "parameters": [
+                            {
+                                "name": "q",
+                                "in": "query",
+                                "required": True,
+                                "schema": {"type": "string"},
+                            }
+                        ],
+                        "responses": {"200": {"description": "found true/false"}},
+                    }
+                },
+                "/api/verify/{tx_id}": {
+                    "post": {
+                        "tags": ["criptografia"],
+                        "summary": "Verificar firma (opcionalmente alterando el payload)",
+                        "parameters": [
+                            {
+                                "name": "tx_id",
+                                "in": "path",
+                                "required": True,
+                                "schema": {"type": "integer"},
+                            }
+                        ],
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {"tamper": {"type": "boolean"}},
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "Resultado de verificación"}},
+                    }
+                },
+            },
+        }
+    )
+
+
+@app.route("/api/docs")
+def api_docs():
+    return render_template("api_docs.html")
 
 
 if __name__ == "__main__":

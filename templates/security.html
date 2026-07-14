@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Seguridad · BRE-PAY{% endblock %}
+{% block content %}
+<section class="dash-head">
+  <div>
+    <p class="eyebrow">Seguridad</p>
+    <h1>Criptografía RSA</h1>
+    <p class="muted">Tu clave pública y propiedades del prototipo.</p>
+  </div>
+</section>
+
+<section class="dash-grid">
+  <article class="panel">
+    <h2>Propiedades</h2>
+    <ul class="confirm-pipeline">
+      <li><span>A</span> Autenticidad — firma RSA-PSS</li>
+      <li><span>I</span> Integridad — la firma falla si se altera el payload</li>
+      <li><span>N</span> No repudio — solo tu privada puede firmar</li>
+      <li><span>C</span> Confidencialidad — RSA-OAEP + AES-GCM</li>
+    </ul>
+  </article>
+  <article class="panel">
+    <h2>Cuenta</h2>
+    <p class="muted">@{{ user.username }}</p>
+    <p class="muted">Huella pública: <code class="mono">{{ fingerprint }}</code></p>
+  </article>
+</section>
+
+<section class="panel wide">
+  <h2>Clave pública RSA (PEM)</h2>
+  <pre class="pem">{{ user.public_key_pem }}</pre>
+</section>
+{% endblock %}

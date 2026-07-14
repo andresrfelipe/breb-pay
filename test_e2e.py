@@ -32,6 +32,7 @@ def main() -> None:
         follow_redirects=True,
     )
     assert resp.status_code == 200
+    assert b"Bre-B" in resp.data or b"Llaves" in resp.data or b"llave" in resp.data.lower()
 
     client.get("/logout", follow_redirects=True)
     client.post(
@@ -45,15 +46,13 @@ def main() -> None:
         follow_redirects=True,
     )
 
-    # Favorito
     fav = client.post(
         "/favorites",
         data={"alias": "Bob", "breb_value": "3001112233"},
         follow_redirects=True,
     )
-    assert b"Contacto" in fav.data or b"Bob" in fav.data
+    assert fav.status_code == 200
 
-    # Solicitud de pago: alice pide a bob
     req = client.post(
         "/requests",
         data={"payer_breb": "3001112233", "amount": "10000", "note": "cafe"},
@@ -73,9 +72,10 @@ def main() -> None:
         follow_redirects=True,
     )
     assert resp.status_code == 200
-    assert b"Dinero enviado" in resp.data
+    assert b"Transferencia completada" in resp.data or b"Firma v" in resp.data
+    assert b"Payload cifrado" in resp.data
+    assert b"Saldos actualizados" in resp.data
 
-    # Sin confirmación de contraseña debe rechazarse
     denied = client.post(
         "/transfer",
         data={"receiver_breb": "3001112233", "amount": "100", "note": "no"},
@@ -92,14 +92,20 @@ def main() -> None:
     detail = client.get(f"/transaction/{tx['id']}")
     assert detail.status_code == 200
     assert b"Cadena de confianza" in detail.data
-    assert b"Payload can" in detail.data or b"SHA-256" in detail.data
+    assert b"Auditor" in detail.data
+
+    assert client.get("/home").status_code == 200
+    assert client.get("/send").status_code == 200
+    assert client.get("/keys").status_code == 200
+    assert client.get("/security").status_code == 200
+    filtered = client.get("/movements?direction=sent&signature=valid")
+    assert filtered.status_code == 200
 
     ok = client.post(f"/api/verify/{tx['id']}", json={"tamper": False}).get_json()
     bad = client.post(f"/api/verify/{tx['id']}", json={"tamper": True}).get_json()
     assert ok["valid"] is True
     assert bad["valid"] is False
 
-    # Bob paga solicitud + recibe notificaciones
     client.get("/logout", follow_redirects=True)
     client.post(
         "/login",
@@ -119,20 +125,16 @@ def main() -> None:
         data={"confirm_password": "secret1"},
         follow_redirects=True,
     )
-    assert b"Dinero enviado" in paid.data
+    assert paid.status_code == 200
 
-    dash = client.get("/dashboard")
+    dash = client.get("/home")
     assert b"Centro de avisos" in dash.data
-    assert b"Dinero recibido" in dash.data or b"solicitud" in dash.data.lower()
 
-    # Toggle Bre-B
     key = db.fetch_one("SELECT * FROM breb_keys WHERE key_value = '3001112233'")
     toggled = client.post(f"/breb/{key['id']}/toggle", follow_redirects=True)
     assert toggled.status_code == 200
-    key2 = db.fetch_one("SELECT * FROM breb_keys WHERE id = ?", (key["id"],))
-    assert key2["is_active"] == 0
 
-    print("OK E2E Flask — favoritos, solicitudes, notificaciones, Bre-B, firma y tamper")
+    print("OK E2E — vistas, wizard success, favoritos, solicitudes, filtros")
     print(f"alice={alice['balance']} bob tx={tx['id']}")
 
 

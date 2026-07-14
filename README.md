@@ -50,6 +50,23 @@ Incluye registro/login, claves RSA, llaves Bre-B, saldo virtual, transferencias 
 
 No incluye bancos reales, pasarelas ni validación gubernamental.
 
+## API REST (OpenAPI)
+
+Con el servidor en marcha:
+
+- Spec JSON: http://127.0.0.1:5001/api/openapi.json
+- Swagger UI: http://127.0.0.1:5001/api/docs
+
+Endpoints útiles: `/api/health`, `/api/me`, `/api/transactions`, `/api/transfers`, `/api/lookup-breb`, `/api/verify/<id>`.
+
+## Tests
+
+```bash
+python test_crypto.py
+python test_e2e.py
+python test_integration.py
+```
+
 ## Equipo / propuesta
 
 Alineado a la *Propuesta de Visibilidad Tecnológica*: sistema seguro de pagos digitales basado en llaves Bre-B y criptografía RSA, extendido con **cifrado del payload** (Propuesta B).

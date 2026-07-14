@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Enviado · BRE-PAY{% endblock %}
+{% block content %}
+<section class="success-hero">
+  <p class="eyebrow">Paso 4 de 4</p>
+  <h1>Transferencia completada</h1>
+  <p class="muted">Dinero enviado a {{ receiver_name }} · ${{ '%.2f'|format(tx.amount) }} COP</p>
+  <ul class="security-chips" aria-label="Estado de seguridad">
+    <li>Firma válida</li>
+    <li>Payload cifrado</li>
+    <li>Saldos actualizados</li>
+  </ul>
+</section>
+
+<section class="dash-grid">
+  <article class="panel">
+    <h2>Comprobante</h2>
+    <dl class="confirm-summary">
+      <div>
+        <dt>Movimiento</dt>
+        <dd class="mono">#{{ tx.id }}</dd>
+      </div>
+      <div>
+        <dt>Destino</dt>
+        <dd class="mono">{{ tx.receiver_breb }}</dd>
+      </div>
+      <div>
+        <dt>Beneficiario</dt>
+        <dd>{{ receiver_name }} (@{{ receiver_username }})</dd>
+      </div>
+      <div>
+        <dt>Estado</dt>
+        <dd>{{ tx.status }}</dd>
+      </div>
+    </dl>
+    <div class="btn-row">
+      <a class="btn" href="{{ url_for('transaction_detail', tx_id=tx.id) }}">Ver auditoría</a>
+      <a class="btn btn-ghost" href="{{ url_for('send') }}">Nueva transferencia</a>
+    </div>
+  </article>
+  <article class="panel">
+    <h2>Qué ocurrió</h2>
+    <ol class="confirm-pipeline">
+      <li><span>✓</span> Payload canónico serializado</li>
+      <li><span>✓</span> Firma RSA-PSS aplicada</li>
+      <li><span>✓</span> Sobre RSA-OAEP + AES-GCM creado</li>
+      <li><span>✓</span> Débito y crédito de saldos confirmados</li>
+    </ol>
+  </article>
+</section>
+{% endblock %}

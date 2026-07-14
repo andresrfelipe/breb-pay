@@ -1,9 +1,20 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}BRE-PAY{% endblock %}</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("brepay-theme") || "dark";
+        if (t !== "light" && t !== "dark") t = "dark";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -12,23 +23,31 @@
 <body class="{% block body_class %}{% endblock %}{% if landing %} is-landing{% endif %}">
   {% if not landing %}
   <header class="topbar">
-    <a class="brand" href="{{ url_for('index') }}">BRE-PAY</a>
+    <a class="brand" href="{{ url_for('home') if session.get('user_id') else url_for('index') }}">BRE-PAY</a>
     <nav>
       {% if session.get('user_id') %}
-        <a href="{{ url_for('dashboard') }}">Cuenta</a>
-        <a class="nav-bell" href="{{ url_for('dashboard') }}#notifications" title="Avisos">
+        <a class="nav-bell" href="{{ url_for('home') }}#notifications" title="Avisos">
           Avisos
           {% if unread_notifications %}
             <span class="nav-badge">{{ unread_notifications }}</span>
           {% endif %}
         </a>
+        <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Cambiar tema">Tema</button>
         <a href="{{ url_for('logout') }}">Salir</a>
       {% else %}
+        <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Cambiar tema">Tema</button>
         <a href="{{ url_for('login') }}">Entrar</a>
         <a href="{{ url_for('register') }}">Registro</a>
       {% endif %}
     </nav>
   </header>
+  {% if session.get('user_id') %}
+  <nav class="app-nav" aria-label="Secciones">
+    <a href="{{ url_for('home') }}" class="{% if nav_active == 'home' %}is-active{% endif %}">
+      {% if nav_active == 'home' %}Inicio{% else %}← Volver al inicio{% endif %}
+    </a>
+  </nav>
+  {% endif %}
   {% endif %}
 
   {% with messages = get_flashed_messages(with_categories=true) %}

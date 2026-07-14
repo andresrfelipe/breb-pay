@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Llaves · BRE-PAY{% endblock %}
+{% block content %}
+<section class="dash-head">
+  <div>
+    <p class="eyebrow">Llaves</p>
+    <h1>Bre-B</h1>
+    <p class="muted">Activa, desactiva o marca una llave como primaria. La alfanumérica siempre empieza con @.</p>
+  </div>
+</section>
+
+<section class="panel wide">
+  <h2>Registrar llave</h2>
+  <form method="post" action="{{ url_for('create_breb') }}" class="form" id="breb-form">
+    <label>Tipo
+      <select name="key_type" id="breb-type" required>
+        {% for t in breb_types %}
+          <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Valor
+      <input
+        name="key_value"
+        id="breb-value"
+        required
+        autocomplete="off"
+        data-placeholders='{{ breb_placeholders | tojson }}'
+        placeholder="{{ breb_placeholders.telefono }}">
+    </label>
+    <p class="muted" id="breb-hint-type">Ejemplo teléfono: solo dígitos, sin @.</p>
+    <button class="btn" type="submit">Registrar llave</button>
+  </form>
+
+  <h3 class="sub">Tus llaves</h3>
+  {% if keys %}
+    <ul class="key-list">
+      {% for k in keys %}
+        <li class="key-row {% if not k.is_active %}is-inactive{% endif %}">
+          <div class="key-main">
+            <code>{{ k.key_value }}</code>
+            <span class="tag">{{ k.key_type }}</span>
+            {% if k.is_primary %}<span class="tag tag-primary">Primaria</span>{% endif %}
+            {% if not k.is_active %}<span class="tag">Inactiva</span>{% endif %}
+          </div>
+          <div class="key-actions">
+            {% if k.is_active and not k.is_primary %}
+            <form method="post" action="{{ url_for('set_primary_breb', key_id=k.id) }}">
+              <button class="btn-mini" type="submit">Primaria</button>
+            </form>
+            {% endif %}
+            <form method="post" action="{{ url_for('toggle_breb', key_id=k.id) }}">
+              <button class="btn-mini" type="submit">{% if k.is_active %}Desactivar{% else %}Activar{% endif %}</button>
+            </form>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Sin llaves aún.</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    const typeEl = document.getElementById("breb-type");
+    const valueEl = document.getElementById("breb-value");
+    const hintEl = document.getElementById("breb-hint-type");
+    if (!typeEl || !valueEl) return;
+
+    let placeholders = {};
+    try {
+      placeholders = JSON.parse(valueEl.dataset.placeholders || "{}");
+    } catch (_) {}
+
+    const hints = {
+      telefono: "Teléfono: solo dígitos (ej. 3000000000). Sin @.",
+      documento: "Documento: solo dígitos (ej. 1000000). Sin @.",
+      email: "Email: formato correo (ej. example@dominio.com). Sin @ al inicio del usuario.",
+      alfanumerica: "Alfanumérica: @ al inicio + letras y números (ej. @usuario123).",
+    };
+
+    function applyType() {
+      const t = typeEl.value;
+      valueEl.placeholder = placeholders[t] || "";
+      if (hintEl) hintEl.textContent = hints[t] || "";
+    }
+
+    typeEl.addEventListener("change", applyType);
+    valueEl.addEventListener("blur", () => {
+      if (typeEl.value !== "alfanumerica") return;
+      const v = valueEl.value.trim();
+      if (v && !v.startsWith("@")) valueEl.value = "@" + v.replace(/^@+/, "");
+    });
+    applyType();
+  })();
+</script>
+{% endblock %}
